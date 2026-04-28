@@ -1,5 +1,9 @@
 # kilo-me
 
+<p align="center">
+  <img src="images/kilo-me_logo.png" alt="kilo-me logo" width="320">
+</p>
+
 > A self-improving agentic coding workspace for [Kilo Code](https://kilo.ai), powered by **all OpenRouter models** (with Chinese frontier models scored to the top by default and Western frontier variants one `@coder-us` away), with persistent SQLite memory, semantic Mermaid recall via ChromaDB, a relationship graph in embedded Kuzu, an auto-refreshed model catalog, and a GitHub-synced best-practices repo. Configured **globally** at `~/.config/kilo/` (XDG Base Directory spec) so it works across every project. Runtime managed by **uv** with **PEP 723 inline scripts** — no venv juggling, no `pip install` rituals.
 
 ## Why this exists
