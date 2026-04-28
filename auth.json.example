@@ -1,0 +1,9 @@
+{
+  "openrouter": {
+    "type": "api",
+    "key": "sk-or-v1-PUT-YOUR-KEY-HERE"
+  },
+  "BP_REPO_PATH": "/Users/you/code/kilo-best-practices",
+  "BP_REMOTE_BRANCH": "main",
+  "BP_AUTO_MERGE": "0"
+}

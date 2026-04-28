@@ -1,0 +1,42 @@
+{
+  "_comment": "Legacy mcpServers schema for the VS Code extension. The installer renders __KILO_HOME__ to the absolute path. Prefer kilo.jsonc — this is here for compatibility.",
+  "mcpServers": {
+    "sqlite-memory": {
+      "command": "uv",
+      "args": ["run", "--script", "__KILO_HOME__/mcp_servers/sqlite_memory/server.py"],
+      "env": {
+        "MEMORY_DB_PATH": "__KILO_HOME__/memory.sqlite"
+      },
+      "alwaysAllow": ["search_prompts", "get_session_history", "count_pattern"],
+      "disabled": false
+    },
+    "openrouter-models": {
+      "command": "uv",
+      "args": ["run", "--script", "__KILO_HOME__/mcp_servers/openrouter_models/server.py"],
+      "env": {
+        "OPENROUTER_API_KEY": "${env:OPENROUTER_API_KEY}",
+        "MODELS_CACHE_PATH": "__KILO_HOME__/models.curated.json"
+      },
+      "alwaysAllow": ["top_coding_models", "top_free_models", "model_for_budget", "list_models_by_author", "cache_status"],
+      "disabled": false
+    },
+    "mermaid-vector": {
+      "command": "uv",
+      "args": ["run", "--script", "__KILO_HOME__/mcp_servers/mermaid_vector/server.py"],
+      "env": {
+        "CHROMA_PATH": "__KILO_HOME__/chroma"
+      },
+      "alwaysAllow": ["search_diagrams", "similar_decisions", "list_diagrams", "collection_stats"],
+      "disabled": false
+    },
+    "graph-memory": {
+      "command": "uv",
+      "args": ["run", "--script", "__KILO_HOME__/mcp_servers/graph_memory/server.py"],
+      "env": {
+        "GRAPH_DB_PATH": "__KILO_HOME__/graph.kuzu"
+      },
+      "alwaysAllow": ["neighbors", "find_path", "cypher", "stats"],
+      "disabled": false
+    }
+  }
+}

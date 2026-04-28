@@ -1,0 +1,153 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  // ---------------------------------------------------------------------------
+  // kilo-me — GLOBAL Kilo Code config
+  //
+  // This file is a TEMPLATE. The installer (`install.sh`) renders it with
+  // `__KILO_HOME__` replaced by the absolute path of $XDG_CONFIG_HOME/kilo
+  // (typically ~/.config/kilo) and writes the result to that location, where
+  // Kilo Code reads it for ALL projects on this machine.
+  //
+  // After install, edit ~/.config/kilo/kilo.jsonc directly for personal
+  // tweaks — re-running install.sh will OVERWRITE it (a backup is kept first).
+  // ---------------------------------------------------------------------------
+
+  // OpenRouter is a built-in provider in Kilo — no `provider.openrouter` block
+  // is needed. Authenticate once with `kilo auth login`, which writes the
+  // provider object into ~/.local/share/kilo/auth.json. Reference models as
+  // "openrouter/<id>" (or "openai/<id>" for direct OpenAI routes).
+  "model": "openrouter/moonshotai/kimi-k2.6",
+
+  // ---------------------------------------------------------------------------
+  // Agents — built-in slots (architect, code, debug, ask) point at the
+  // Chinese-default lineup; -ch and -us variants are reachable by their full
+  // name (@architect-us, @coder-ch, etc). Pricing pinned to April-2026 leaders;
+  // any agent can call openrouter-models.model_for_budget() at task start to
+  // override.
+  // ---------------------------------------------------------------------------
+  "agent": {
+    // ── Built-in slots ──────────────────────────────────────────────────────
+    "architect": {
+      "model": "openrouter/deepseek/deepseek-v4-pro",
+      "temperature": 0.1,
+      "permission": { "edit": "deny", "bash": "deny" }
+    },
+    "code": {
+      "model": "openrouter/moonshotai/kimi-k2.6",
+      "temperature": 0.3,
+      "permission": { "edit": "allow", "bash": "allow" }
+    },
+    "debug": {
+      "model": "openrouter/z-ai/glm-5.1",
+      "temperature": 0.2,
+      "permission": { "edit": "deny", "bash": "allow" }
+    },
+    // The ask agent prompt (.kilo/agents/ask.md) calls
+    // openrouter-models.top_free_models() at task start and routes through
+    // whatever free model wins. The slug below is a sentinel default for
+    // bootstrap before that tool is reachable.
+    "ask": {
+      "model": "openrouter/deepseek/deepseek-v3.2:free",
+      "temperature": 0.4,
+      "permission": { "edit": "deny", "bash": "deny" }
+    },
+
+    // ── Chinese-default lineup ──────────────────────────────────────────────
+    "architect-ch": {
+      "model": "openrouter/deepseek/deepseek-v4-pro",
+      "temperature": 0.1,
+      "permission": { "edit": "deny", "bash": "deny" }
+    },
+    "coder-ch": {
+      "model": "openrouter/moonshotai/kimi-k2.6",
+      "temperature": 0.3,
+      "permission": { "edit": "allow", "bash": "allow" }
+    },
+    "debugger-ch": {
+      "model": "openrouter/z-ai/glm-5.1",
+      "temperature": 0.2,
+      "permission": { "edit": "deny", "bash": "allow" }
+    },
+    "memory-curator-ch": {
+      "model": "openrouter/qwen/qwen3.6-plus",
+      "temperature": 0.4,
+      "permission": { "edit": "ask", "bash": "deny" }
+    },
+    "cheap-fallback-ch": {
+      "model": "openrouter/deepseek/deepseek-v3.2",
+      "temperature": 0.3,
+      "permission": { "edit": "allow", "bash": "ask" }
+    },
+
+    // ── Western frontier lineup ─────────────────────────────────────────────
+    "architect-us": {
+      "model": "openrouter/anthropic/claude-opus-4.7",
+      "temperature": 0.1,
+      "permission": { "edit": "deny", "bash": "deny" }
+    },
+    "coder-us": {
+      "model": "openai/gpt-5.4",
+      "temperature": 0.3,
+      "permission": { "edit": "allow", "bash": "allow" }
+    },
+    "debugger-us": {
+      "model": "openrouter/anthropic/claude-sonnet-4.6",
+      "temperature": 0.2,
+      "permission": { "edit": "deny", "bash": "allow" }
+    },
+    "memory-curator-us": {
+      "model": "openrouter/anthropic/claude-haiku-4.5",
+      "temperature": 0.4,
+      "permission": { "edit": "ask", "bash": "deny" }
+    },
+    "cheap-fallback-us": {
+      "model": "openrouter/x-ai/grok-4.1-fast",
+      "temperature": 0.3,
+      "permission": { "edit": "allow", "bash": "ask" }
+    }
+  },
+
+  // ---------------------------------------------------------------------------
+  // MCP servers — invoked via `uv run`, which reads each script's PEP 723
+  // metadata block and materializes deps in uv's cache. No system Python
+  // pollution. Absolute paths are filled in by install.sh.
+  // ---------------------------------------------------------------------------
+  "mcp": {
+    "sqlite-memory": {
+      "type": "local",
+      "command": ["uv", "run", "--script", "__KILO_HOME__/mcp_servers/sqlite_memory/server.py"],
+      "environment": {
+        "MEMORY_DB_PATH": "__KILO_HOME__/memory.sqlite"
+      },
+      "timeout": 30000,
+      "enabled": true
+    },
+    "openrouter-models": {
+      "type": "local",
+      "command": ["uv", "run", "--script", "__KILO_HOME__/mcp_servers/openrouter_models/server.py"],
+      "environment": {
+        "MODELS_CACHE_PATH": "__KILO_HOME__/models.curated.json"
+      },
+      "timeout": 60000,
+      "enabled": true
+    },
+    "mermaid-vector": {
+      "type": "local",
+      "command": ["uv", "run", "--script", "__KILO_HOME__/mcp_servers/mermaid_vector/server.py"],
+      "environment": {
+        "CHROMA_PATH": "__KILO_HOME__/chroma"
+      },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "graph-memory": {
+      "type": "local",
+      "command": ["uv", "run", "--script", "__KILO_HOME__/mcp_servers/graph_memory/server.py"],
+      "environment": {
+        "GRAPH_DB_PATH": "__KILO_HOME__/graph.kuzu"
+      },
+      "timeout": 60000,
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# Decisions land here after the Memory Curator detects 3+ successful uses
+# of the same pattern. Run `make sync-bp` to push to the GitHub repo.

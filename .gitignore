@@ -1,0 +1,69 @@
+# =============================================================================
+# kilo-zh-stack — .gitignore
+# =============================================================================
+
+# Local stores (never commit)
+.kilo/memory.sqlite
+.kilo/memory.sqlite-journal
+.kilo/memory.sqlite-wal
+.kilo/memory.sqlite-shm
+.kilo/chroma/
+.kilo/models.curated.json
+.kilo/refresh.log
+.kilo/sync.log
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (in case you build a JS MCP later)
+node_modules/
+
+# Sentence-transformers cached models (large)
+.cache/
