@@ -222,7 +222,7 @@ The model picker in the Kilo TUI lets you switch on the fly. Persistent per-agen
     "code":              { "providerID": "openrouter", "modelID": "moonshotai/kimi-k2.6" },
     "architect-ch":      { "providerID": "openrouter", "modelID": "deepseek/deepseek-v4-pro" },
     "coder-us":          { "providerID": "openai",     "modelID": "gpt-5.4" },
-    "ask":               { "providerID": "openrouter", "modelID": "deepseek/deepseek-v3.2:free" }
+    "ask":               { "providerID": "openrouter", "modelID": "openrouter/free" }
   }
 }
 ```

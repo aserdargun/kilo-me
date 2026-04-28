@@ -47,7 +47,7 @@
     // whatever free model wins. The slug below is a sentinel default for
     // bootstrap before that tool is reachable.
     "ask": {
-      "model": "openrouter/deepseek/deepseek-v3.2:free",
+      "model": "openrouter/openrouter/free",
       "temperature": 0.4,
       "permission": { "edit": "deny", "bash": "deny" }
     },

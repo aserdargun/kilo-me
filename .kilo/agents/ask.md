@@ -2,7 +2,7 @@
 description: Read-only Q&A over the codebase. Routes through OpenRouter free models only.
 mode: primary
 color: "#0EA5E9"
-model: openrouter/deepseek/deepseek-v3.2:free
+model: openrouter/openrouter/free
 temperature: 0.4
 permission:
   edit: deny
