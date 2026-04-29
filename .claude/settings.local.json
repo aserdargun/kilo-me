@@ -7,7 +7,8 @@
       "Read(//c/Users/serdar.gundogdu/.config/**)",
       "Bash(rm -rf /c/Users/serdar.gundogdu/.local/share/kilo)",
       "Read(//c/Users/serdar.gundogdu/.local/share/kilo/**)",
-      "Bash(bash -n /c/Users/serdar.gundogdu/github-personal/kilo-me/install.sh)"
+      "Bash(bash -n /c/Users/serdar.gundogdu/github-personal/kilo-me/install.sh)",
+      "Bash(AUTH_FILE=/c/Users/serdar.gundogdu/.local/share/kilo/auth.json uv run *)"
     ]
   }
 }

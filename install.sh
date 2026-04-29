@@ -197,7 +197,10 @@ if path.exists():
     except json.JSONDecodeError:
         data = {}
 if inf:
+    # Kilo CLI requires the provider object to declare {"type": "api"} —
+    # without it the runtime ignores the key and falls back to free models.
     prov = data.setdefault("openrouter", {})
+    prov["type"] = "api"
     prov["key"] = inf
 if admin:
     data["OPENROUTER_ADMIN_KEY"] = admin
