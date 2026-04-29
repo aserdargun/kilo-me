@@ -33,7 +33,7 @@ flowchart TB
   user([You]) -->|kilo auth login| auth[(~/.local/share/kilo/auth.json<br/>chmod 600)]
   user --> kilo[Kilo Code]
   kilo -->|reads| cfg[~/.config/kilo/kilo.jsonc]
-  kilo -->|via OpenRouter / OpenAI| or[(OpenRouter + OpenAI APIs)]
+  kilo -->|via OpenRouter / OpenAI| orapi[(OpenRouter + OpenAI APIs)]
 
   subgraph agents_ch [Chinese-default lineup]
     arc_ch[architect-ch<br/>DeepSeek V4 Pro]
@@ -71,15 +71,15 @@ flowchart TB
   mc_ch & mc_us -->|3+ successes| bp[GitHub kilo-best-practices]
 
   subgraph project [Per-project cost tracking]
-    pi[make project-init] -->|admin /keys POST| or
+    pi[make project-init] -->|admin /keys POST| orapi
     pkey[(./auth.json<br/>per-project sub-key)]
     pi --> pkey
     pi --> pstate[(./.kilo/project.json)]
     agents_ch & agents_us -->|usage_log.py snapshot| plog[(./USAGE.log.jsonl)]
     rep[make usage-report] -->|admin /keys/hash + log| usagemd[USAGE.md]
-    pf[make project-finish] -->|optional disable/delete| or
+    pf[make project-finish] -->|optional disable/delete| orapi
   end
-  pkey -.->|inference uses sub-key| or
+  pkey -.->|inference uses sub-key| orapi
 ```
 
 ## Quickstart — global install
