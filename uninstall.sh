@@ -47,61 +47,65 @@ if [ ! -d "$KILO_HOME" ] && [ ! -d "$KILO_DATA_HOME" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Always remove: code, rendered configs, generated logs/caches
-# -----------------------------------------------------------------------------
-if [ -d "$KILO_HOME" ]; then
-  echo "removing code and config from $KILO_HOME"
-  rm -rf "$KILO_HOME/agents"
-  rm -rf "$KILO_HOME/rules"
-  rm -rf "$KILO_HOME/mcp_servers"
-  rm -rf "$KILO_HOME/scripts"
-  rm -rf "$KILO_HOME/bin"
-  rm -f  "$KILO_HOME/kilo.jsonc"
-  rm -f  "$KILO_HOME/mcp.json"
-  rm -f  "$KILO_HOME/models.curated.json"
-  rm -f  "$KILO_HOME"/kilo.jsonc.bak.*
-  rm -f  "$KILO_HOME"/refresh.log "$KILO_HOME"/sync.log
-fi
-
-# Note: --purge also removes the Kuzu graph store (graph.kuzu) below.
-
-# -----------------------------------------------------------------------------
-# Conditionally remove: user data + credentials
+# Purge mode: nuke the entire trees so nothing survives (logs, caches, state,
+# rendered configs, the Kuzu graph dir, etc.). --keep-auth preserves auth.json
+# across the wipe by stashing+restoring it.
 # -----------------------------------------------------------------------------
 if [ "$PURGE" = "1" ]; then
-  echo "purging user data: memory.sqlite, chroma/, graph.kuzu/, decisions/, adr/"
-  rm -f  "$KILO_HOME/memory.sqlite" \
-         "$KILO_HOME/memory.sqlite-journal" \
-         "$KILO_HOME/memory.sqlite-wal" \
-         "$KILO_HOME/memory.sqlite-shm"
-  rm -rf "$KILO_HOME/chroma" \
-         "$KILO_HOME/graph.kuzu" \
-         "$KILO_HOME/decisions" \
-         "$KILO_HOME/adr"
-
-  if [ "$KEEP_AUTH" = "1" ]; then
-    echo "keeping auth.json (--keep-auth)"
-  elif [ -f "$KILO_DATA_HOME/auth.json" ]; then
-    echo "purging credentials: $KILO_DATA_HOME/auth.json"
-    rm -f "$KILO_DATA_HOME/auth.json"
+  STASHED_AUTH=""
+  if [ "$KEEP_AUTH" = "1" ] && [ -f "$KILO_DATA_HOME/auth.json" ]; then
+    STASHED_AUTH="$(mktemp)"
+    cp "$KILO_DATA_HOME/auth.json" "$STASHED_AUTH"
+    echo "stashed auth.json (--keep-auth) → will restore after purge"
   fi
-fi
 
-# -----------------------------------------------------------------------------
-# Tidy up empty directories
-# -----------------------------------------------------------------------------
-if [ -d "$KILO_HOME" ] && [ -z "$(ls -A "$KILO_HOME" 2>/dev/null)" ]; then
-  rmdir "$KILO_HOME"
-  echo "removed empty $KILO_HOME"
-elif [ -d "$KILO_HOME" ]; then
-  echo "kept $KILO_HOME (still contains data — pass --purge to remove)"
-fi
+  if [ -d "$KILO_HOME" ]; then
+    echo "purging $KILO_HOME (entire tree)"
+    rm -rf "$KILO_HOME"
+  fi
+  if [ -d "$KILO_DATA_HOME" ]; then
+    echo "purging $KILO_DATA_HOME (entire tree)"
+    rm -rf "$KILO_DATA_HOME"
+  fi
 
-if [ -d "$KILO_DATA_HOME" ] && [ -z "$(ls -A "$KILO_DATA_HOME" 2>/dev/null)" ]; then
-  rmdir "$KILO_DATA_HOME"
-  echo "removed empty $KILO_DATA_HOME"
-elif [ -d "$KILO_DATA_HOME" ]; then
-  echo "kept $KILO_DATA_HOME (contains auth.json — pass --purge to remove)"
+  if [ -n "$STASHED_AUTH" ]; then
+    mkdir -p "$KILO_DATA_HOME"
+    mv "$STASHED_AUTH" "$KILO_DATA_HOME/auth.json"
+    chmod 600 "$KILO_DATA_HOME/auth.json"
+    echo "restored auth.json → $KILO_DATA_HOME/auth.json"
+  fi
+else
+  # -----------------------------------------------------------------------------
+  # Default mode: remove code/config, preserve user data + credentials
+  # -----------------------------------------------------------------------------
+  if [ -d "$KILO_HOME" ]; then
+    echo "removing code and config from $KILO_HOME"
+    rm -rf "$KILO_HOME/agents"
+    rm -rf "$KILO_HOME/rules"
+    rm -rf "$KILO_HOME/mcp_servers"
+    rm -rf "$KILO_HOME/scripts"
+    rm -rf "$KILO_HOME/bin"
+    rm -f  "$KILO_HOME/kilo.jsonc"
+    rm -f  "$KILO_HOME/mcp.json"
+    rm -f  "$KILO_HOME/models.curated.json"
+    rm -f  "$KILO_HOME"/kilo.jsonc.bak.*
+    rm -f  "$KILO_HOME"/refresh.log "$KILO_HOME"/sync.log
+  fi
+
+  # Tidy empty dirs (only relevant when not purging — purge already removed them)
+  if [ -d "$KILO_HOME" ] && [ -z "$(ls -A "$KILO_HOME" 2>/dev/null)" ]; then
+    rmdir "$KILO_HOME"
+    echo "removed empty $KILO_HOME"
+  elif [ -d "$KILO_HOME" ]; then
+    echo "kept $KILO_HOME (still contains data — pass --purge to remove)"
+  fi
+
+  if [ -d "$KILO_DATA_HOME" ] && [ -z "$(ls -A "$KILO_DATA_HOME" 2>/dev/null)" ]; then
+    rmdir "$KILO_DATA_HOME"
+    echo "removed empty $KILO_DATA_HOME"
+  elif [ -d "$KILO_DATA_HOME" ]; then
+    echo "kept $KILO_DATA_HOME (contains auth.json — pass --purge to remove)"
+  fi
 fi
 
 echo "done. uv's per-script cache is left intact at ~/.cache/uv/."
