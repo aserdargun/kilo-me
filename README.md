@@ -80,6 +80,7 @@ flowchart TB
     pf[make project-finish] -->|optional disable/delete| or
   end
   pkey -.->|inference uses sub-key| or
+```
 
 ## Quickstart — global install
 
