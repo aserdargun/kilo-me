@@ -12,8 +12,9 @@
 #   7. Warms the OpenRouter model cache (if a key is already configured)
 #
 # The result: Kilo Code reads ~/.config/kilo/kilo.jsonc globally for every
-# project. Credentials live separately at ~/.local/share/kilo/auth.json — run
-# `kilo auth login` after this script completes to populate it.
+# project. Credentials live separately at ~/.local/share/kilo/auth.json — this
+# script prompts for the OpenRouter inference + management keys and writes
+# them there (chmod 600). Set KILO_SKIP_AUTH_PROMPT=1 to skip.
 #
 # Override locations: KILO_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME.
 #
@@ -97,10 +98,118 @@ copy_dir "$SRC_DIR/scripts"      "$KILO_HOME/scripts"
 # decisions/ + adr/ are user data — only create if absent
 mkdir -p "$KILO_HOME/decisions" "$KILO_HOME/adr"
 
-# Make sure the data home exists (auth.json lives here once `kilo auth login`
-# runs — this script no longer bootstraps it from env vars).
+# Make sure the data home exists (auth.json lives here — populated below by
+# prompting for OpenRouter keys, or via `kilo auth login` afterwards).
 mkdir -p "$KILO_DATA_HOME"
 chmod 700 "$KILO_DATA_HOME"
+
+# -----------------------------------------------------------------------------
+# 2b. Prompt for OpenRouter keys and write auth.json
+#     - Inference key  → openrouter.key       (used by every agent at runtime)
+#     - Management key → OPENROUTER_ADMIN_KEY (used by scripts/project_init.py
+#                                              to mint per-project sub-keys)
+#     Pre-existing values in auth.json are preserved if the user submits empty
+#     input. Set KILO_SKIP_AUTH_PROMPT=1 to bypass entirely (e.g. CI).
+# -----------------------------------------------------------------------------
+prompt_secret() {
+  # $1 = prompt label, $2 = current value (may be empty). Echoes the new value.
+  # NOTE: input is NOT hidden — `read -rs` interacts badly with right-click /
+  # bracketed-paste in mintty (Git Bash on Windows), so we accept visible echo
+  # in exchange for reliable pasting across MSYS/WSL/Linux/macOS terminals.
+  local label="$1" current="$2" hint="" answer=""
+  if [ -n "$current" ]; then
+    hint=" [keep existing]"
+  fi
+  local prompt_text
+  prompt_text="$(printf "${YEL}[install]${NC} %s%s: " "$label" "$hint")"
+  if [ -r /dev/tty ]; then
+    IFS= read -r -p "$prompt_text" answer < /dev/tty || answer=""
+  else
+    IFS= read -r -p "$prompt_text" answer || answer=""
+  fi
+  # Strip any bracketed-paste escape wrappers that mintty/xterm may inject
+  # (\e[200~ … \e[201~) and trim trailing CR from Windows line endings.
+  answer="${answer#$'\e[200~'}"
+  answer="${answer%$'\e[201~'}"
+  answer="${answer%$'\r'}"
+  # Trim leading/trailing whitespace.
+  answer="${answer#"${answer%%[![:space:]]*}"}"
+  answer="${answer%"${answer##*[![:space:]]}"}"
+  if [ -z "$answer" ]; then
+    printf '%s' "$current"
+  else
+    printf '%s' "$answer"
+  fi
+}
+
+if [ "${KILO_SKIP_AUTH_PROMPT:-0}" = "1" ]; then
+  log "KILO_SKIP_AUTH_PROMPT=1 — skipping auth.json prompt"
+elif [ ! -t 0 ] && [ ! -r /dev/tty ]; then
+  warn "non-interactive shell and no /dev/tty — skipping auth.json prompt"
+  warn "  run 'kilo auth login' or write $AUTH_FILE manually"
+else
+  # Pull existing values so re-running install.sh doesn't clobber them on empty input.
+  EXISTING_INF=""
+  EXISTING_ADMIN=""
+  if [ -f "$AUTH_FILE" ]; then
+    EXISTING_INF=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+v = (d.get("openrouter") or {}).get("key") or d.get("OPENROUTER_API_KEY") or ""
+print(v)
+PYEOF
+)
+    EXISTING_ADMIN=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+print(d.get("OPENROUTER_ADMIN_KEY", ""))
+PYEOF
+)
+  fi
+
+  log "configuring $AUTH_FILE — paste keys (input hidden); press Enter to keep existing"
+  OR_INFERENCE_KEY=$(prompt_secret "OpenRouter API key (inference, sk-or-v1-…)" "$EXISTING_INF")
+  OR_ADMIN_KEY=$(prompt_secret "OpenRouter management key (sk-or-mgmt-… or sk-or-v1-…)" "$EXISTING_ADMIN")
+
+  if [ -z "$OR_INFERENCE_KEY" ] && [ -z "$OR_ADMIN_KEY" ]; then
+    warn "  no keys provided — leaving auth.json untouched"
+  else
+    AUTH_FILE="$AUTH_FILE" \
+    OR_INFERENCE_KEY="$OR_INFERENCE_KEY" \
+    OR_ADMIN_KEY="$OR_ADMIN_KEY" \
+    uv run --no-project python - <<'PYEOF'
+import json, os, pathlib
+path = pathlib.Path(os.environ["AUTH_FILE"])
+inf = os.environ.get("OR_INFERENCE_KEY", "")
+admin = os.environ.get("OR_ADMIN_KEY", "")
+data = {}
+if path.exists():
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        data = {}
+if inf:
+    prov = data.setdefault("openrouter", {})
+    prov["key"] = inf
+if admin:
+    data["OPENROUTER_ADMIN_KEY"] = admin
+path.write_text(json.dumps(data, indent=2) + "\n")
+try:
+    os.chmod(path, 0o600)
+except OSError:
+    pass
+PYEOF
+    log "  wrote $AUTH_FILE (chmod 600)"
+  fi
+fi
 
 # -----------------------------------------------------------------------------
 # 3. Render kilo.jsonc + mcp.json with absolute paths
@@ -236,12 +345,11 @@ ${GRN}===== install complete =====${NC}
   ChromaDB     : $KILO_HOME/chroma/
   Graph DB     : $KILO_HOME/graph.kuzu/
   Model cache  : $KILO_HOME/models.curated.json
-  Credentials  : $AUTH_FILE  ${YEL}(populate via 'kilo auth login')${NC}
+  Credentials  : $AUTH_FILE  ${YEL}(written above; rerun installer or use 'kilo auth login' to update)${NC}
 
 Next steps:
-  1. Authenticate with OpenRouter (Kilo's built-in flow writes the provider
-     object into auth.json with chmod 600):
-       kilo auth login
+  1. (Optional) verify auth.json — both keys should be present:
+       make auth-status
 
   2. Start Kilo from any project — no wrapper required:
        cd ~/my-project
