@@ -14,7 +14,8 @@ KILO_DATA_HOME ?= $(XDG_DATA_HOME)/kilo
 AUTH_FILE ?= $(KILO_DATA_HOME)/auth.json
 
 .PHONY: help install-global uninstall uninstall-purge bootstrap dev-deps \
-        refresh-models sync-bp test test-mcp lint clean nuke \
+        refresh-models sync-bp usage-report project-init project-finish \
+        usage-log-summary test test-mcp lint clean nuke \
         chroma-status chroma-reset memory-status graph-status agent-test where \
         auth-status
 
@@ -59,6 +60,21 @@ refresh-models: ## Refresh OpenRouter catalog (uses ~/.config/kilo by default)
 
 sync-bp: ## Sync promoted patterns to the best-practices repo
 	uv run scripts/sync_best_practices.py
+
+usage-report: ## Generate USAGE.md from the OpenRouter API (project-scoped)
+	uv run scripts/usage_report.py
+
+project-init: ## Provision a per-project OpenRouter key (writes ./auth.json + ./.kilo/project.json)
+	uv run scripts/project_init.py
+
+project-finish: ## Mark project completed; pass DELETE=1 or DISABLE=1 to clean up the key
+	@flags=""; \
+	if [ "$(DELETE)" = "1" ]; then flags="$$flags --delete-key"; fi; \
+	if [ "$(DISABLE)" = "1" ]; then flags="$$flags --disable-key"; fi; \
+	uv run scripts/project_finish.py $$flags
+
+usage-log-summary: ## Print top-N completed prompts by cost from USAGE.log.jsonl
+	uv run scripts/usage_log.py summary
 
 agent-test: ## End-to-end smoke: ask Kilo for the top 3 coding models
 	@command -v kilo >/dev/null || (echo "kilo CLI not installed; npm i -g @kilocode/cli"; exit 1)

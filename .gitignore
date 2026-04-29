@@ -1,5 +1,5 @@
 # =============================================================================
-# kilo-zh-stack — .gitignore
+# kilo-me — .gitignore
 # =============================================================================
 
 # Local stores (never commit)
@@ -11,6 +11,14 @@
 .kilo/models.curated.json
 .kilo/refresh.log
 .kilo/sync.log
+
+# Usage report history (per-machine cost trend log; USAGE.md itself stays)
+USAGE.history.jsonl
+USAGE.log.jsonl
+
+# Project-local auth (per-project OpenRouter sub-key — NEVER commit)
+auth.json
+.kilo/project.json
 
 # Secrets
 .env

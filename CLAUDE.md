@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `kilo-me` is a globally-installed configuration bundle for the [Kilo Code](https://kilo.ai) CLI. It is **not** a Python package you import from — it is a set of self-contained scripts plus templated config that `install.sh` deploys to `~/.config/kilo/` (XDG Base Directory spec) so Kilo behaves the same way across every project on the machine. Credentials live separately at `~/.local/share/kilo/auth.json` (chmod 600), populated by Kilo's own `kilo auth login` flow.
 
+Beyond the config bundle, the repo also ships a **per-project cost-tracking workflow**: an OpenRouter management/provisioning key in the global `auth.json` is used by `scripts/project_init.py` to mint a dedicated sub-key per project, agents log per-prompt cost deltas via `scripts/usage_log.py`, and `scripts/usage_report.py` renders a project-scoped `USAGE.md` with a final-cost banner once `scripts/project_finish.py` runs. See [§ Per-project cost tracking](#per-project-cost-tracking) below.
+
 Two operating modes:
 
 - **Global install** (end-user): `install.sh` copies `.kilo/{agents,rules}/`, `mcp_servers/`, `scripts/` to `$KILO_HOME` (= `~/.config/kilo/`), renders `kilo.jsonc` with absolute paths, initializes the SQLite/Chroma/Kuzu stores, and pre-warms uv's cache. Authentication is a separate step (`kilo auth login`) — the installer no longer bootstraps `auth.json` from environment variables.
@@ -39,11 +41,17 @@ make sync-bp                                   # push promoted patterns to GitHu
 make where                                     # print all paths (incl. auth.json)
 make auth-status                               # which keys auth.json provides
 make memory-status / make chroma-status / make graph-status   # diagnostics
+
+# Per-project cost tracking (run from inside a project directory)
+make project-init                              # provision per-project sub-key (uses admin key)
+make usage-report                              # render ./USAGE.md
+make usage-log-summary                         # top-N expensive prompts from USAGE.log.jsonl
+make project-finish [DISABLE=1|DELETE=1]       # snapshot final cost; optionally clean up key
 ```
 
 The dev test suite assumes `uv` is on PATH — `install.sh`/`bootstrap.sh` install it via `astral.sh` if missing. Tests do not require an `OPENROUTER_API_KEY`; they monkeypatch `_fetch_models`.
 
-## Architecture: the three load-bearing pieces
+## Architecture: the four load-bearing pieces
 
 ### 1. PEP 723 inline scripts + `uv run --script`
 
@@ -86,6 +94,35 @@ Patterns graduate from local SQLite to a separate GitHub `kilo-best-practices` r
 
 `sqlite-memory.count_pattern` returns `promotion_ready: bool` based on these criteria. The Memory Curator agent (`.kilo/agents/memory-curator-ch.md` or `-us.md`) writes `docs/decisions/<kebab-title>.md` AND adds a `Decision` node to the graph linked to every contributing `Prompt` via `PROMOTED_TO`; `make sync-bp` (or the cron in `scripts/sync_best_practices.py`) opens a PR against `BP_REPO_PATH`. Anti-patterns deliberately *not* promoted: one-off bug fixes, single-success patterns, anything done in `--auto` without human review (see `.kilo/rules/03-best-practice-promotion.md`).
 
+### 4. Per-project cost tracking
+
+Cost is tracked **per project**, not per account. Each project gets its own OpenRouter sub-key, every prompt's cost is captured as a `/keys/{hash}.usage` delta, and the project's `USAGE.md` is the running ledger. Lifecycle:
+
+1. **`scripts/project_init.py`** — calls `POST /api/v1/keys` with the admin key (read from `OPENROUTER_ADMIN_KEY` in the global `auth.json`), creates a sub-key labeled after the project, and writes:
+   - `./auth.json` (chmod 600) with `{"openrouter": {"key": "..."}, "OPENROUTER_KEY_HASH": "..."}` — agents/Kilo pick this up via the per-project resolver in `usage_report.py`
+   - `./.kilo/project.json` with `{name, key_hash, key_label, key_limit, status, created_at, finished_at}`
+2. **`scripts/usage_log.py snapshot --phase {start,end} --prompt-id <id>`** — agents call this around each prompt (per Rule 04). Each call hits `GET /keys/{hash}` and appends one JSON line to `./USAGE.log.jsonl`. The cost of a single prompt is `end.key_usage − start.key_usage` (paired by `prompt_id`).
+3. **`scripts/usage_report.py`** — reads `.kilo/project.json`; if a key hash is present, prefers admin `/keys/{hash}` for authoritative spend (more accurate than `/key`). Renders `USAGE.md` with sections: project metadata, project key spend, cost trend (from `USAGE.history.jsonl`, appended each run), per-prompt costs (by-agent rollup + top 10), and the optional account-wide `/activity` breakdown.
+4. **`scripts/project_finish.py`** — marks `.kilo/project.json` `status="completed"`, snapshots the final `/keys/{hash}.usage` into `final_usage`, and on `--disable-key` / `--delete-key` patches or deletes the OpenRouter key. Subsequent `usage-report` runs render a "Project completed / Final cost: $X.XX" banner at the top.
+
+Two-key model: the admin key NEVER leaves `~/.local/share/kilo/auth.json`; projects only ever see their own scoped sub-key. Both `auth.json` (per-project) and the admin key are read by the same shared `_auth.py` loader.
+
+Files written into each project (all gitignored except `USAGE.md`):
+
+| Path | Written by | Notes |
+|---|---|---|
+| `./auth.json` | `project_init.py` | chmod 600; per-project sub-key |
+| `./.kilo/project.json` | `project_init.py` / `project_finish.py` | project state + key hash |
+| `./USAGE.md` | `usage_report.py` | the ledger — committed |
+| `./USAGE.history.jsonl` | every `usage_report.py` run | per-machine snapshot trail |
+| `./USAGE.log.jsonl` | every `usage_log.py snapshot` | per-prompt cost log |
+
+Why this design rather than per-prompt OpenAI-style usage objects:
+- `/key` only sees the calling key, not other keys → can't attribute per-project spend
+- `/activity` is account-wide and exposes no `X-Title` tag → can't filter by project
+- `POST /generation` requires scraping `id` from each chat-completion response → would need a proxy
+- Polling `/keys/{hash}.usage` before/after each prompt is a single fast HTTP call, key-scoped, and works with whatever Kilo runtime ships
+
 ## Project conventions (from `.kilo/rules/` and agent prompts)
 
 These rules govern **the agents Kilo runs**, not Claude Code itself, but they shape how this codebase is structured:
@@ -96,6 +133,7 @@ These rules govern **the agents Kilo runs**, not Claude Code itself, but they sh
 - **Coder scaffold mandate**: when a Coder agent generates a *new* project, it always creates `README.md`, `AGENTS.md`, `CHANGELOG.md`, and `TODO.md`. Don't skip any of these even on small scaffolds — the rest of the agent fleet expects them to exist.
 - **No direct OpenRouter calls** from agent code — model selection always routes through `openrouter-models.model_for_budget` so choices are auditable. The `ask` agent additionally routes through `openrouter-models.top_free_models()` so it never spends paid tokens.
 - **Two lanes, one default**: built-in slots (`architect`, `code`, `debug`, `ask`) point at the `-ch` lineup. The `-us` lineup is reachable by full name (`@coder-us`, `@architect-us`, etc.) and intentionally *not* the default.
+- **Per-prompt cost snapshots** when `./.kilo/project.json` exists (Rule 04): every agent invocation brackets its work with `usage_log.py snapshot --phase start` and `--phase end` using the same `prompt-id` as the Rule 02 SQLite log. The `ask` agent (always free) and read-only invocations are exempt.
 
 ## Where things live (cheatsheet)
 
@@ -105,7 +143,7 @@ kilo-me/                                # repo root
 │   ├── kilo.jsonc                      # has __KILO_HOME__ placeholders; rendered on install
 │   ├── agents/{architect,coder,debugger,memory-curator,cheap-fallback}-{ch,us}.md  # 10 agents
 │   ├── agents/ask.md                   # free-models-only Q&A agent
-│   └── rules/{01,02,03}-*.md           # prompt-injected behavior rules
+│   └── rules/{01,02,03,04}-*.md        # prompt-injected behavior rules (04 = per-prompt cost log)
 ├── mcp_servers/
 │   ├── _auth.py                        # shared auth.json loader (single source of truth)
 │   ├── test_auth.py                    # 11 cases for the loader
@@ -116,7 +154,11 @@ kilo-me/                                # repo root
 ├── scripts/
 │   ├── bootstrap.sh                    # DEV: project-local setup
 │   ├── refresh_models.py               # PEP 723 cron entry
-│   └── sync_best_practices.py          # PEP 723 git push to BP repo
+│   ├── sync_best_practices.py          # PEP 723 git push to BP repo
+│   ├── project_init.py                 # provision per-project OpenRouter sub-key
+│   ├── usage_log.py                    # per-prompt cost snapshots → USAGE.log.jsonl
+│   ├── usage_report.py                 # render USAGE.md (project + cost trend + per-prompt)
+│   └── project_finish.py               # snapshot final cost; optionally disable/delete key
 ├── tests/test_smoke.py                 # cross-cutting e2e — uses load_mcp_server fixture
 ├── CHANGELOG.md                        # release log
 ├── TODO.md                             # active work tracker (checklist)

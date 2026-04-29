@@ -2,10 +2,10 @@
 
 Active work tracker for **kilo-me**. Move items to `CHANGELOG.md`'s `[Unreleased]` section once they land; remove them from this file when they ship in a tagged release.
 
-## Current milestone — kilo-zh-stack → kilo-me rename + agent expansion
+## Current milestone — kilo-me rename + agent expansion
 
 - [x] Rename project to `kilo-me` (pyproject + every internal reference).
-- [x] Remove `kilo-zh` custom command; rely on `kilo auth login` for credential setup.
+- [x] Remove the legacy custom auth wrapper command; rely on `kilo auth login` for credential setup.
 - [x] Rename agents `*-zh.md` → `*-ch.md` and pin to the agreed model slugs.
   - [x] `architect-ch` → `openrouter/deepseek/deepseek-v4-pro`
   - [x] `coder-ch` → `openrouter/moonshotai/kimi-k2.6`
@@ -19,10 +19,16 @@ Active work tracker for **kilo-me**. Move items to `CHANGELOG.md`'s `[Unreleased
 - [x] Add a graph database (Kuzu) for memory and wire `memory-curator-ch` / `memory-curator-us` to write nodes + edges.
 - [x] Make `ask` route through OpenRouter free models only (`top_free_models()` MCP tool + `.kilo/agents/ask.md`).
 - [x] Document Windows support (WSL2 / Git Bash) in `README.md` and `CLAUDE.md`.
+- [x] Add generated each project itself cost from OpenRouter API to `USAGE.md` with detailed usage statistics. (`make usage-report` → `scripts/usage_report.py`)
+- [x] Per-project key provisioning + per-prompt cost logging workflow:
+  - `make project-init` → admin key provisions a per-project sub-key, writes `./auth.json` + `./.kilo/project.json`
+  - `scripts/usage_log.py snapshot --phase {start,end} --prompt-id <id>` → captures `/keys/{hash}.usage` deltas to `./USAGE.log.jsonl` (Rule 04)
+  - `make usage-report` → reads project state, prefers admin `/keys/{hash}` for authoritative spend, renders Per-prompt costs section
+  - `make project-finish [DELETE=1|DISABLE=1]` → marks complete, snapshots final cost, optionally cleans up the OpenRouter key
 
 ## Post-merge follow-ups
 
-- [ ] Move the working directory from `kilo-zh-stack/` to `kilo-me/` (`mv ~/Projects/kilo-zh-stack ~/Projects/kilo-me`) and update any local IDE / shell aliases. Out-of-band step — git history follows.
+- [x] Move the working directory to `kilo-me/` and update any local IDE / shell aliases. Out-of-band step — git history follows.
 - [ ] Re-run `bash install.sh` after the rename to refresh `~/.config/kilo/`.
 - [ ] Re-run `kilo auth login` to confirm the no-wrapper flow works end-to-end.
 - [ ] Re-cut the daily cron lines if your crontab pinned them to the old path.

@@ -4,7 +4,7 @@
   <img src="images/kilo-me_logo.png" alt="kilo-me logo" width="320">
 </p>
 
-> A self-improving agentic coding workspace for [Kilo Code](https://kilo.ai), powered by **all OpenRouter models** (with Chinese frontier models scored to the top by default and Western frontier variants one `@coder-us` away), with persistent SQLite memory, semantic Mermaid recall via ChromaDB, a relationship graph in embedded Kuzu, an auto-refreshed model catalog, and a GitHub-synced best-practices repo. Configured **globally** at `~/.config/kilo/` (XDG Base Directory spec) so it works across every project. Runtime managed by **uv** with **PEP 723 inline scripts** — no venv juggling, no `pip install` rituals.
+> A self-improving agentic coding workspace for [Kilo Code](https://kilo.ai), powered by **all OpenRouter models** (with Chinese frontier models scored to the top by default and Western frontier variants one `@coder-us` away), with persistent SQLite memory, semantic Mermaid recall via ChromaDB, a relationship graph in embedded Kuzu, an auto-refreshed model catalog, a GitHub-synced best-practices repo, and **per-project cost tracking** via OpenRouter sub-keys provisioned automatically per project. Configured **globally** at `~/.config/kilo/` (XDG Base Directory spec) so it works across every project. Runtime managed by **uv** with **PEP 723 inline scripts** — no venv juggling, no `pip install` rituals.
 
 ## Why this exists
 
@@ -13,6 +13,7 @@ Most AI coding setups bind you to one expensive frontier model and forget everyt
 - It routes work to the best Chinese model for each role by default (Kimi K2.6 for coding, DeepSeek V4 Pro for planning, GLM-5.1 for debugging, Qwen 3.6 Plus for memory curation), but the catalog spans **every** OpenRouter model — and the matching `-us` agents (Claude Opus 4.7, GPT-5.4, Sonnet 4.6, Haiku 4.5, Grok 4.1 Fast) are addressable by name when you want a Western frontier model on demand.
 - Every task it runs is logged, indexed semantically, **and graphed** — relationships between prompts, agents, tags, diagrams, and promoted decisions live in an embedded Kuzu graph database alongside the SQLite log and Chroma index. The Memory Curator agent walks that graph to surface prior outcomes during planning.
 - If a pattern succeeds repeatedly, it's promoted to a versioned best-practices repo on GitHub.
+- **Cost is per-project, not per-account.** `make project-init` mints a dedicated OpenRouter sub-key for each project, agents log per-prompt cost deltas to `USAGE.log.jsonl`, and `make usage-report` rolls the spend up into a project-scoped `USAGE.md`. At wrap-up, `make project-finish` snapshots a final cost banner and (optionally) disables/deletes the key.
 
 ## Two ways to run it
 
@@ -68,7 +69,17 @@ flowchart TB
   cron[Daily cron 06:00] -.->|uv run| refresh[scripts/refresh_models.py]
   refresh --> cache
   mc_ch & mc_us -->|3+ successes| bp[GitHub kilo-best-practices]
-```
+
+  subgraph project [Per-project cost tracking]
+    pi[make project-init] -->|admin /keys POST| or
+    pkey[(./auth.json<br/>per-project sub-key)]
+    pi --> pkey
+    pi --> pstate[(./.kilo/project.json)]
+    agents_ch & agents_us -->|usage_log.py snapshot| plog[(./USAGE.log.jsonl)]
+    rep[make usage-report] -->|admin /keys/hash + log| usagemd[USAGE.md]
+    pf[make project-finish] -->|optional disable/delete| or
+  end
+  pkey -.->|inference uses sub-key| or
 
 ## Quickstart — global install
 
@@ -245,6 +256,75 @@ make refresh-models
 
 ---
 
+### Per-project cost tracking
+
+`kilo-me` ships an end-to-end workflow that gives every project its own OpenRouter sub-key, logs each prompt's cost as a delta, and rolls everything up into a project-scoped `USAGE.md` — so you can answer "what did *this* project cost?" without hunting through account-wide invoices.
+
+#### One-time global setup
+
+Add an OpenRouter **provisioning / management key** (Settings → Provisioning Keys on openrouter.ai — these are the only keys with `/keys` and `/activity` access) to your global auth.json as a flat string:
+
+```jsonc
+// ~/.local/share/kilo/auth.json
+{
+  "openrouter":           { "type": "api", "key": "sk-or-v1-…INFERENCE…" },
+  "OPENROUTER_ADMIN_KEY": "sk-or-v1-…MANAGEMENT…"
+}
+```
+
+Why flat: the loader maps `"openrouter": {...}` to `OPENROUTER_API_KEY`. A second provider object would collide. Use a flat top-level string for the admin key so it lands in `os.environ` verbatim and the inference key is left alone.
+
+#### Per-project lifecycle
+
+```bash
+cd ~/Projects/new-thing
+
+# 1. Provision a per-project sub-key (uses admin key)
+make project-init                        # or PROJECT_CREDIT_LIMIT=20 make project-init
+# → writes ./auth.json (chmod 600) + ./.kilo/project.json
+
+# 2. Work happens. Agents call:
+#      uv run scripts/usage_log.py snapshot --phase start --prompt-id <id> --agent <slug>
+#      uv run scripts/usage_log.py snapshot --phase end   --prompt-id <id> --agent <slug>
+#    around each prompt (per Rule 04). Both calls hit /keys/{hash} once and append a row
+#    to ./USAGE.log.jsonl. The cost of one prompt = end.key_usage − start.key_usage.
+
+# 3. Generate the report any time
+make usage-report                        # writes ./USAGE.md
+# → Project metadata, project key spend, cost trend, per-prompt costs (by agent + top 10),
+#   and the account-wide /activity breakdown for context.
+
+# 4. (Optional) inspect the prompt log directly
+make usage-log-summary
+
+# 5. Wrap up
+make project-finish                      # snapshots final cost into USAGE.md, marks status=completed
+make project-finish DISABLE=1            # also disables the key on OpenRouter (reversible)
+make project-finish DELETE=1             # also deletes the key (irreversible)
+```
+
+#### Files written into each project
+
+| Path | Written by | Committed? |
+|---|---|---|
+| `./auth.json` | `project-init` | **No** — gitignored by default |
+| `./.kilo/project.json` | `project-init` / `project-finish` | No — gitignored |
+| `./USAGE.md` | `usage-report` | Yes — the project-cost ledger |
+| `./USAGE.history.jsonl` | every `usage-report` run | No — per-machine snapshot trail |
+| `./USAGE.log.jsonl` | every `usage_log.py snapshot` | No — per-machine prompt log |
+
+The script suite (`project_init.py`, `usage_log.py`, `usage_report.py`, `project_finish.py`) auto-loads the global admin key via `mcp_servers/_auth.py`, so the per-project key/hash never has to leave the project folder and the admin key never has to leave `~/.local/share/kilo/auth.json`.
+
+#### Why it works this way
+
+- `/key` returns the inference key's spend, but inference keys can't see other keys. The admin key + `GET /keys/{hash}` is the only way to get authoritative per-key totals.
+- `/activity` is account-wide and exposes no project tag — it's useful for the "where did my month's $$ go" breakdown but can't answer "what did this project cost." The sub-key approach sidesteps that limitation entirely.
+- Per-prompt cost deltas come from polling `/keys/{hash}.usage` before and after each agent task — one fast HTTP call per snapshot, no proxying, no scraping `generation_id` from chat-completion responses.
+
+See `.kilo/rules/04-per-prompt-cost-logging.md` for the agent-side convention and the `usage_report.py` docstring for env knobs (`USAGE_REPORT_PATH`, `USAGE_HISTORY_LIMIT`, etc.).
+
+---
+
 ### Keeping agents focused on the current project
 
 Drop a `kilo.json` (or `kilo.jsonc`) in your project root to override globals for that project only. Config is deep-merged — only what you set is overridden:
@@ -273,20 +353,21 @@ Use Kilo's own `kilo auth login` flow — it walks you through provider selectio
 
 ### Schema
 
-Kilo's native format (what `kilo auth login` writes):
+Kilo's native format (what `kilo auth login` writes), augmented with the optional admin key for per-project cost tracking:
 
 ```json
 {
-  "openrouter": {"type": "api", "key": "sk-or-v1-..."},
-  "BP_REPO_PATH": "/Users/you/code/kilo-best-practices",
-  "BP_REMOTE_BRANCH": "main",
-  "BP_AUTO_MERGE": "0"
+  "openrouter":           {"type": "api", "key": "sk-or-v1-...INFERENCE..."},
+  "OPENROUTER_ADMIN_KEY": "sk-or-v1-...MANAGEMENT...",
+  "BP_REPO_PATH":         "/Users/you/code/kilo-best-practices",
+  "BP_REMOTE_BRANCH":     "main",
+  "BP_AUTO_MERGE":        "0"
 }
 ```
 
 Provider objects (`{"type": "api", "key": "..."}`) are mapped to `<PROVIDER>_API_KEY` env vars by `mcp_servers/_auth.py` — so `"openrouter".key` becomes `OPENROUTER_API_KEY`. Flat string values are set directly. Both forms can coexist in the same file.
 
-Only `openrouter.key` is required.
+Only `openrouter.key` is required. `OPENROUTER_ADMIN_KEY` is optional but unlocks `make project-init`, `make project-finish`, the authoritative `/keys/{hash}` spend lookup in `make usage-report`, and the account-wide `/activity` breakdown — see [Per-project cost tracking](#per-project-cost-tracking).
 
 ### Lookup priority
 
@@ -453,7 +534,11 @@ kilo-me/                                # repo root
 ├── scripts/
 │   ├── bootstrap.sh                    # DEV: project-local setup
 │   ├── refresh_models.py               # PEP 723 cron entry
-│   └── sync_best_practices.py          # PEP 723 git push to BP repo
+│   ├── sync_best_practices.py          # PEP 723 git push to BP repo
+│   ├── project_init.py                 # Provision per-project OpenRouter sub-key
+│   ├── usage_log.py                    # Per-prompt cost snapshots → USAGE.log.jsonl
+│   ├── usage_report.py                 # Render USAGE.md (project + cost trend + per-prompt)
+│   └── project_finish.py               # Snapshot final cost; optionally disable/delete key
 ├── docs/
 │   ├── adr/                            # Architecture Decision Records
 │   └── decisions/                      # Promoted patterns
@@ -494,6 +579,12 @@ Run `make help` for the full list. Highlights:
 - `make memory-status` / `make chroma-status` / `make graph-status` — diagnostics
 - `make uninstall` — remove code+config but keep user data
 - `make uninstall-purge` — remove everything
+
+Per-project cost tracking:
+- `make project-init` — provision a per-project OpenRouter sub-key (uses admin key)
+- `make usage-report` — render `./USAGE.md` (project metadata, key spend, cost trend, per-prompt costs)
+- `make usage-log-summary` — print top-N completed prompts by cost from `USAGE.log.jsonl`
+- `make project-finish [DISABLE=1|DELETE=1]` — snapshot final cost; optionally clean up the OpenRouter key
 
 For development:
 - `make bootstrap` — project-local venv + `.kilo/` for testing
