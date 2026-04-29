@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
 # =============================================================================
-# install.sh — deploy kilo-me globally to ~/.config/kilo/
+# install.sh — deploy kilo-me globally to ~/.kilo-me/
 #
 # What this does (idempotent — safe to re-run):
 #   1. Verifies/installs uv (Astral's Python package manager)
-#   2. Copies .kilo/{agents,rules}/, mcp_servers/, scripts/ to ~/.config/kilo/
+#   2. Copies .kilo/{agents,rules}/, mcp_servers/, scripts/ to the install root
 #   3. Renders kilo.jsonc + mcp.json with absolute paths
 #   4. Pre-warms uv's cache for each MCP server
 #   5. Initializes the SQLite schema, ChromaDB collection, and Kuzu graph
-#   6. Patches ~/.local/state/kilo/model.json to pin per-agent defaults
+#   6. Patches state/kilo/model.json to pin per-agent defaults
 #   7. Warms the OpenRouter model cache (if a key is already configured)
+#   8. Drops a `kilo-me` shim at ~/.local/bin/ so vanilla `kilo` stays untouched
 #
-# The result: Kilo Code reads ~/.config/kilo/kilo.jsonc globally for every
-# project. Credentials live separately at ~/.local/share/kilo/auth.json — this
-# script prompts for the OpenRouter inference + management keys and writes
-# them there (chmod 600). Set KILO_SKIP_AUTH_PROMPT=1 to skip.
+# The result: TWO entry points on PATH —
+#   * `kilo`      → Kilo Code's stock behavior (reads default ~/.config/kilo/)
+#   * `kilo-me`   → Kilo Code with this repo's bundle (reads ~/.kilo-me/...)
 #
-# Override locations: KILO_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME.
+# The shim simply exports XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_STATE_HOME at
+# $KILO_ME_BASE/{config,data,state} and exec's `kilo`. Credentials live at
+# $KILO_ME_BASE/data/kilo/auth.json — this script prompts for the OpenRouter
+# inference + management keys and writes them there (chmod 600). Set
+# KILO_SKIP_AUTH_PROMPT=1 to skip the prompt.
+#
+# Override the install root with KILO_ME_BASE=/some/path (default ~/.kilo-me).
+# Or override individual XDG slots: KILO_HOME, KILO_DATA_HOME, KILO_STATE_HOME.
 #
 # Windows: run inside WSL2 or Git Bash. Native PowerShell support is not yet
 # implemented; the bash dependencies (set -e, uv, sed, sqlite3) are POSIX-only.
@@ -27,15 +34,16 @@ set -euo pipefail
 cd "$(dirname "$0")"
 SRC_DIR="$(pwd)"
 
-# Default install location follows the XDG Base Directory spec:
-#   $XDG_CONFIG_HOME/kilo  (typically ~/.config/kilo) — code, agents, MCP servers
-#   $XDG_DATA_HOME/kilo    (typically ~/.local/share/kilo) — credentials
-# Override with KILO_HOME=/some/path before running this script.
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-KILO_HOME="${KILO_HOME:-$XDG_CONFIG_HOME/kilo}"
-KILO_DATA_HOME="${KILO_DATA_HOME:-$XDG_DATA_HOME/kilo}"
+# Install root. We deliberately do NOT use the system XDG defaults
+# (~/.config/kilo etc.) — those belong to vanilla Kilo so users can keep
+# running plain `kilo` with stock behavior. The `kilo-me` shim points Kilo at
+# this parallel tree via XDG_*_HOME at runtime.
+KILO_ME_BASE="${KILO_ME_BASE:-$HOME/.kilo-me}"
+KILO_HOME="${KILO_HOME:-$KILO_ME_BASE/config/kilo}"
+KILO_DATA_HOME="${KILO_DATA_HOME:-$KILO_ME_BASE/data/kilo}"
+KILO_STATE_HOME="${KILO_STATE_HOME:-$KILO_ME_BASE/state/kilo}"
 AUTH_FILE="${AUTH_FILE:-$KILO_DATA_HOME/auth.json}"
+KILO_ME_SHIM="${KILO_ME_SHIM:-$HOME/.local/bin/kilo-me}"
 
 # ANSI-C quoting: $'...' interprets \033 at definition time, so the variable
 # holds the actual ESC byte. This lets the value render correctly via both
@@ -68,10 +76,24 @@ fi
 log "uv: $(uv --version)"
 
 # -----------------------------------------------------------------------------
-# 2. Layout $KILO_HOME (default: ~/.config/kilo/)
+# 2. Layout $KILO_HOME (default: ~/.kilo-me/config/kilo/)
 # -----------------------------------------------------------------------------
 log "deploying to $KILO_HOME"
 mkdir -p "$KILO_HOME"
+
+# If a legacy install lives at the XDG default ~/.config/kilo/, surface a
+# migration hint. We never auto-move — the user might rely on that location.
+LEGACY_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/kilo"
+LEGACY_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/kilo"
+if [ -d "$LEGACY_HOME" ] && [ "$LEGACY_HOME" != "$KILO_HOME" ]; then
+  warn "legacy install detected at $LEGACY_HOME"
+  warn "  vanilla 'kilo' will continue reading it as long as it exists."
+  warn "  to migrate it under kilo-me's tree, run (after this installer):"
+  warn "    rm -rf '$KILO_HOME' && mv '$LEGACY_HOME' '$KILO_HOME'"
+  if [ -f "$LEGACY_DATA/auth.json" ] && [ ! -f "$AUTH_FILE" ]; then
+    warn "    mkdir -p '$KILO_DATA_HOME' && mv '$LEGACY_DATA/auth.json' '$AUTH_FILE'"
+  fi
+fi
 
 # Backup existing kilo.jsonc if present (re-install scenario)
 if [ -f "$KILO_HOME/kilo.jsonc" ]; then
@@ -278,12 +300,10 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 7. Patch ~/.local/state/kilo/model.json — pin built-in agents to -ch models
+# 7. Patch $KILO_STATE_HOME/model.json — pin built-in agents to -ch models
 #    Without this, Kilo falls through to a free-tier alias for the default
 #    code mode even when kilo.jsonc sets a different model.
 # -----------------------------------------------------------------------------
-XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
-KILO_STATE_HOME="${KILO_STATE_HOME:-$XDG_STATE_HOME/kilo}"
 MODEL_JSON="$KILO_STATE_HOME/model.json"
 
 log "patching $MODEL_JSON — pinning -ch agents"
@@ -331,14 +351,47 @@ PYEOF
 log "  ok: $MODEL_JSON"
 
 # -----------------------------------------------------------------------------
-# 8. Done
+# 8. Generate the `kilo-me` shim on PATH
+#    Lets users keep `kilo` for stock Kilo behavior and use `kilo-me` to launch
+#    Kilo with this repo's bundle injected via XDG_*_HOME.
+# -----------------------------------------------------------------------------
+log "writing $KILO_ME_SHIM"
+mkdir -p "$(dirname "$KILO_ME_SHIM")"
+cat > "$KILO_ME_SHIM" <<SHIM
+#!/usr/bin/env bash
+# kilo-me — launch Kilo Code with the kilo-me bundle.
+# Generated by install.sh; safe to regenerate by re-running the installer.
+set -e
+KILO_ME_BASE="\${KILO_ME_BASE:-$KILO_ME_BASE}"
+export XDG_CONFIG_HOME="\$KILO_ME_BASE/config"
+export XDG_DATA_HOME="\$KILO_ME_BASE/data"
+export XDG_STATE_HOME="\$KILO_ME_BASE/state"
+export KILO_HOME="\$XDG_CONFIG_HOME/kilo"
+export AUTH_FILE="\$XDG_DATA_HOME/kilo/auth.json"
+exec kilo "\$@"
+SHIM
+chmod +x "$KILO_ME_SHIM"
+log "  ok: $KILO_ME_SHIM"
+
+# Warn if ~/.local/bin isn't on PATH so the shim is discoverable.
+case ":${PATH:-}:" in
+  *":$(dirname "$KILO_ME_SHIM"):"*) ;;
+  *) warn "$(dirname "$KILO_ME_SHIM") is not on PATH — add this to your shell rc:"
+     warn "  export PATH=\"$(dirname "$KILO_ME_SHIM"):\$PATH\""
+     ;;
+esac
+
+# -----------------------------------------------------------------------------
+# 9. Done
 # -----------------------------------------------------------------------------
 cat <<EOF
 
 ${GRN}===== install complete =====${NC}
 
-  KILO_HOME      = $KILO_HOME
-  KILO_DATA_HOME = $KILO_DATA_HOME
+  KILO_ME_BASE    = $KILO_ME_BASE
+  KILO_HOME       = $KILO_HOME
+  KILO_DATA_HOME  = $KILO_DATA_HOME
+  KILO_STATE_HOME = $KILO_STATE_HOME
 
   Config       : $KILO_HOME/kilo.jsonc
   Agents       : $KILO_HOME/agents/        (architect/coder/debugger/memory-curator × ch+us, plus ask)
@@ -348,19 +401,24 @@ ${GRN}===== install complete =====${NC}
   ChromaDB     : $KILO_HOME/chroma/
   Graph DB     : $KILO_HOME/graph.kuzu/
   Model cache  : $KILO_HOME/models.curated.json
-  Credentials  : $AUTH_FILE  ${YEL}(written above; rerun installer or use 'kilo auth login' to update)${NC}
+  Credentials  : $AUTH_FILE  ${YEL}(written above; rerun installer to update)${NC}
+  Wrapper      : $KILO_ME_SHIM
+
+Two entry points on PATH:
+  ${GRN}kilo${NC}      → vanilla Kilo Code (reads ~/.config/kilo/, untouched by this installer)
+  ${GRN}kilo-me${NC}   → Kilo Code launched against $KILO_ME_BASE/
 
 Next steps:
   1. (Optional) verify auth.json — both keys should be present:
        make auth-status
 
-  2. Start Kilo from any project — no wrapper required:
+  2. Launch from any project:
        cd ~/my-project
-       kilo
+       kilo-me
 
-  3. Add a daily cron line for the model refresh (auth.json is read automatically):
+  3. Daily model refresh (auth.json is read automatically):
        0 6 * * *  uv run $KILO_HOME/scripts/refresh_models.py >> $KILO_HOME/refresh.log 2>&1
 
 To uninstall: bash uninstall.sh           (keeps user data + auth.json)
-              bash uninstall.sh --purge   (removes everything)
+              bash uninstall.sh --purge   (removes everything, incl. the shim)
 EOF

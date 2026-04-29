@@ -4,7 +4,7 @@
   <img src="images/kilo-me_logo.png" alt="kilo-me logo" width="320">
 </p>
 
-> A self-improving agentic coding workspace for [Kilo Code](https://kilo.ai), powered by **all OpenRouter models** (with Chinese frontier models scored to the top by default and Western frontier variants one `@coder-us` away), with persistent SQLite memory, semantic Mermaid recall via ChromaDB, a relationship graph in embedded Kuzu, an auto-refreshed model catalog, a GitHub-synced best-practices repo, and **per-project cost tracking** via OpenRouter sub-keys provisioned automatically per project. Configured **globally** at `~/.config/kilo/` (XDG Base Directory spec) so it works across every project. Runtime managed by **uv** with **PEP 723 inline scripts** — no venv juggling, no `pip install` rituals.
+> A self-improving agentic coding workspace for [Kilo Code](https://kilo.ai), powered by **all OpenRouter models** (with Chinese frontier models scored to the top by default and Western frontier variants one `@coder-us` away), with persistent SQLite memory, semantic Mermaid recall via ChromaDB, a relationship graph in embedded Kuzu, an auto-refreshed model catalog, a GitHub-synced best-practices repo, and **per-project cost tracking** via OpenRouter sub-keys provisioned automatically per project. Installed at `~/.kilo-me/` and launched via a `kilo-me` shim on `PATH` — so plain `kilo` keeps Kilo's stock defaults while `kilo-me` opts you into this bundle. Runtime managed by **uv** with **PEP 723 inline scripts** — no venv juggling, no `pip install` rituals.
 
 ## Why this exists
 
@@ -19,10 +19,12 @@ Most AI coding setups bind you to one expensive frontier model and forget everyt
 
 | Mode | When | What lives where |
 |---|---|---|
-| **Global install** (default) | You want Kilo to work the same way in every project | `~/.config/kilo/` — config, agents, MCP servers, memory, embeddings, graph<br/>`~/.local/share/kilo/auth.json` — credentials (chmod 600, populated via `kilo auth login`) |
+| **Global install** (default) | You want Kilo to work the same way in every project | `~/.kilo-me/config/kilo/` — config, agents, MCP servers, memory, embeddings, graph<br/>`~/.kilo-me/data/kilo/auth.json` — credentials (chmod 600, written by `install.sh` on first run)<br/>`~/.kilo-me/state/kilo/model.json` — per-agent model pinning<br/>`~/.local/bin/kilo-me` — wrapper shim that exports XDG_*_HOME and execs `kilo` |
 | **Project-local dev** | You're hacking on the stack itself | `<repo>/.kilo/` — same files but project-scoped, plus `.venv/` for tests; secrets in `.env` |
 
 `install.sh` does the global install. `scripts/bootstrap.sh` does the dev one.
+
+> **`kilo` vs `kilo-me`** — vanilla `kilo` reads its own default `~/.config/kilo/` (which this installer leaves alone), so it behaves exactly as Kilo Code ships out of the box. `kilo-me` is a tiny bash shim that points Kilo at `~/.kilo-me/` instead. Pick whichever fits the moment.
 
 ## Architecture
 
@@ -30,9 +32,10 @@ Most AI coding setups bind you to one expensive frontier model and forget everyt
 %% title: kilo-me with global config + uv + graph memory
 %% tags: architecture, overview
 flowchart TB
-  user([You]) -->|kilo auth login| auth[(~/.local/share/kilo/auth.json<br/>chmod 600)]
-  user --> kilo[Kilo Code]
-  kilo -->|reads| cfg[~/.config/kilo/kilo.jsonc]
+  user([You]) -->|bash install.sh prompts| auth[(~/.kilo-me/data/kilo/auth.json<br/>chmod 600)]
+  user -->|kilo-me| shim[~/.local/bin/kilo-me<br/>exports XDG_*_HOME]
+  shim --> kilo[Kilo Code]
+  kilo -->|reads| cfg[~/.kilo-me/config/kilo/kilo.jsonc]
   kilo -->|via OpenRouter / OpenAI| orapi[(OpenRouter + OpenAI APIs)]
 
   subgraph agents_ch [Chinese-default lineup]
@@ -61,10 +64,10 @@ flowchart TB
   agents_ch & agents_us & ask --> sm & om & mv & gm
   om -.->|reads| auth
 
-  sm --> sqlite[(~/.config/kilo/memory.sqlite)]
-  mv --> chroma[(~/.config/kilo/chroma/)]
-  gm --> kuzu[(~/.config/kilo/graph.kuzu)]
-  om --> cache[(~/.config/kilo/models.curated.json)]
+  sm --> sqlite[(~/.kilo-me/config/kilo/memory.sqlite)]
+  mv --> chroma[(~/.kilo-me/config/kilo/chroma/)]
+  gm --> kuzu[(~/.kilo-me/config/kilo/graph.kuzu)]
+  om --> cache[(~/.kilo-me/config/kilo/models.curated.json)]
 
   cron[Daily cron 06:00] -.->|uv run| refresh[scripts/refresh_models.py]
   refresh --> cache
@@ -102,43 +105,59 @@ cd kilo-me
 bash install.sh
 ```
 
-Then authenticate Kilo with OpenRouter (writes `~/.local/share/kilo/auth.json` with chmod 600):
+The installer prompts for two OpenRouter keys (paste them when asked; press Enter to keep existing values on re-runs):
 
-```bash
-kilo auth login
-```
+- **OpenRouter API key (inference)** — `sk-or-v1-…`, used by every agent at runtime.
+- **OpenRouter management key** — used by `make project-init` to mint per-project sub-keys. Optional, but unlocks per-project cost tracking.
+
+Set `KILO_SKIP_AUTH_PROMPT=1` to skip the prompt (useful for CI). Both keys are written to `~/.kilo-me/data/kilo/auth.json` with `chmod 600`.
 
 That's the whole thing. The installer:
 
 1. Installs `uv` if it's missing.
-2. Copies `.kilo/agents/`, `.kilo/rules/`, `mcp_servers/`, and `scripts/` to `~/.config/kilo/`.
-3. Renders `~/.config/kilo/kilo.jsonc` with absolute paths.
+2. Copies `.kilo/agents/`, `.kilo/rules/`, `mcp_servers/`, and `scripts/` to `~/.kilo-me/config/kilo/`.
+3. Renders `~/.kilo-me/config/kilo/kilo.jsonc` with absolute paths.
 4. Pre-warms uv's caches (first MCP call would otherwise time out downloading `chromadb` + `sentence-transformers` + `kuzu`).
-5. Initializes `~/.config/kilo/memory.sqlite`, `~/.config/kilo/chroma/`, and `~/.config/kilo/graph.kuzu/`.
-6. Patches `~/.local/state/kilo/model.json` so the per-agent defaults stick.
-7. Refreshes the OpenRouter model catalog (skipped if `auth.json` is empty — re-run after `kilo auth login`).
+5. Initializes `memory.sqlite`, `chroma/`, and `graph.kuzu/` under that tree.
+6. Patches `~/.kilo-me/state/kilo/model.json` so the per-agent defaults stick.
+7. Refreshes the OpenRouter model catalog (skipped if you didn't provide a key — re-run `make refresh-models` later).
+8. Drops a `kilo-me` shim at `~/.local/bin/kilo-me`. That's the launch command.
 
 ### 3. Verify
 
 ```bash
-make where           # see where everything lives
-make auth-status     # confirm auth.json is found and chmod'd correctly
-make memory-status   # row count in the SQLite store
-make chroma-status   # ChromaDB collection stats
-make graph-status    # Kuzu node + edge counts per label
-make agent-test      # asks Kilo for the top 3 coding models end-to-end
+make where             # see where everything lives
+make wrapper-status    # confirm the kilo-me shim exists and is on PATH
+make auth-status       # confirm auth.json is found and chmod'd correctly
+make memory-status     # row count in the SQLite store
+make chroma-status     # ChromaDB collection stats
+make graph-status      # Kuzu node + edge counts per label
+make agent-test        # asks Kilo (via kilo-me) for the top 3 coding models end-to-end
 ```
 
 ### 4. Set up the daily cron
 
 ```cron
-0 6 * * *  uv run ~/.config/kilo/scripts/refresh_models.py >> ~/.config/kilo/refresh.log 2>&1
-0 7 * * *  uv run ~/.config/kilo/scripts/sync_best_practices.py >> ~/.config/kilo/sync.log 2>&1
+0 6 * * *  uv run ~/.kilo-me/config/kilo/scripts/refresh_models.py >> ~/.kilo-me/config/kilo/refresh.log 2>&1
+0 7 * * *  uv run ~/.kilo-me/config/kilo/scripts/sync_best_practices.py >> ~/.kilo-me/config/kilo/sync.log 2>&1
 ```
 
-The cron scripts auto-load `~/.local/share/kilo/auth.json`, so no shell-rc plumbing is required for the daily refresh.
+The cron scripts auto-load `~/.kilo-me/data/kilo/auth.json`, so no shell-rc plumbing is required for the daily refresh.
 
-Done. Run `kilo` in any project directory and the agents are ready.
+Done. Run `kilo-me` in any project directory and the agents are ready. (`kilo` without the suffix still launches Kilo Code with its stock defaults — the two coexist.)
+
+### Migrating from an older install
+
+Earlier versions of this repo deployed to `~/.config/kilo/` (Kilo's default XDG path) and provided no wrapper. If you're upgrading, the installer leaves the legacy tree in place and prints a migration hint. To move your existing data into the new layout:
+
+```bash
+mkdir -p ~/.kilo-me/config ~/.kilo-me/data ~/.kilo-me/state
+mv ~/.config/kilo            ~/.kilo-me/config/kilo
+mv ~/.local/share/kilo       ~/.kilo-me/data/kilo
+mv ~/.local/state/kilo       ~/.kilo-me/state/kilo
+```
+
+Then re-run `bash install.sh` to refresh the rendered configs against the new paths. After migrating, plain `kilo` will start fresh against an empty `~/.config/kilo/` (i.e. behave like a new Kilo install) and `kilo-me` will pick up your migrated bundle.
 
 ---
 
@@ -146,14 +165,16 @@ Done. Run `kilo` in any project directory and the agents are ready.
 
 ### Starting a session
 
-After `kilo auth login` has populated `auth.json`, just run Kilo directly — there's no wrapper to invoke:
+The installer wrote `auth.json` for you (or you'll re-run `bash install.sh` to update it). To launch Kilo with this bundle:
 
 ```bash
 cd ~/my-project
-kilo
+kilo-me
 ```
 
-Kilo reads `~/.config/kilo/kilo.jsonc` for global config and merges any project-local `kilo.json` / `kilo.jsonc` over the top.
+`kilo-me` is a thin bash shim at `~/.local/bin/kilo-me` that exports `XDG_CONFIG_HOME=~/.kilo-me/config` (and the data/state equivalents) and exec's `kilo`. Kilo then reads `~/.kilo-me/config/kilo/kilo.jsonc` and merges any project-local `kilo.json` / `kilo.jsonc` over the top.
+
+Plain `kilo` is untouched — it still reads its default `~/.config/kilo/`, giving you Kilo's stock behavior whenever you want it.
 
 ---
 
@@ -249,7 +270,7 @@ To let an agent pick its own model based on budget, ask it to call the MCP tool:
 
 ### Refreshing the model catalog
 
-The OpenRouter catalog is cached at `~/.config/kilo/models.curated.json` with a 24h TTL. Refresh manually any time:
+The OpenRouter catalog is cached at `~/.kilo-me/config/kilo/models.curated.json` with a 24h TTL. Refresh manually any time:
 
 ```bash
 make refresh-models
@@ -263,17 +284,17 @@ make refresh-models
 
 #### One-time global setup
 
-Add an OpenRouter **provisioning / management key** (Settings → Provisioning Keys on openrouter.ai — these are the only keys with `/keys` and `/activity` access) to your global auth.json as a flat string:
+The installer prompts for both the inference and the management (provisioning) key on first run, so this is normally already done. To set it manually, your global `auth.json` should look like this:
 
 ```jsonc
-// ~/.local/share/kilo/auth.json
+// ~/.kilo-me/data/kilo/auth.json
 {
   "openrouter":           { "type": "api", "key": "sk-or-v1-…INFERENCE…" },
   "OPENROUTER_ADMIN_KEY": "sk-or-v1-…MANAGEMENT…"
 }
 ```
 
-Why flat: the loader maps `"openrouter": {...}` to `OPENROUTER_API_KEY`. A second provider object would collide. Use a flat top-level string for the admin key so it lands in `os.environ` verbatim and the inference key is left alone.
+The provisioning key is on Settings → Provisioning Keys at openrouter.ai — it's the only key with `/keys` and `/activity` access. Why flat: the loader maps `"openrouter": {...}` to `OPENROUTER_API_KEY`. A second provider object would collide. Use a flat top-level string for the admin key so it lands in `os.environ` verbatim and the inference key is left alone.
 
 #### Per-project lifecycle
 
@@ -314,7 +335,7 @@ make project-finish DELETE=1             # also deletes the key (irreversible)
 | `./USAGE.history.jsonl` | every `usage-report` run | No — per-machine snapshot trail |
 | `./USAGE.log.jsonl` | every `usage_log.py snapshot` | No — per-machine prompt log |
 
-The script suite (`project_init.py`, `usage_log.py`, `usage_report.py`, `project_finish.py`) auto-loads the global admin key via `mcp_servers/_auth.py`, so the per-project key/hash never has to leave the project folder and the admin key never has to leave `~/.local/share/kilo/auth.json`.
+The script suite (`project_init.py`, `usage_log.py`, `usage_report.py`, `project_finish.py`) auto-loads the global admin key via `mcp_servers/_auth.py`, so the per-project key/hash never has to leave the project folder and the admin key never has to leave `~/.kilo-me/data/kilo/auth.json`.
 
 #### Why it works this way
 
@@ -340,17 +361,17 @@ Drop a `kilo.json` (or `kilo.jsonc`) in your project root to override globals fo
 }
 ```
 
-Project config takes precedence over `~/.config/kilo/kilo.jsonc` (see binary docs: remote → global → project → managed).
+Project config takes precedence over `~/.kilo-me/config/kilo/kilo.jsonc` when launched via `kilo-me` (see binary docs: remote → global → project → managed).
 
 ---
 
 ## Credentials and auth.json
 
-Secrets live at `$XDG_DATA_HOME/kilo/auth.json` (typically `~/.local/share/kilo/auth.json`) — separate from the config files at `~/.config/kilo/`. This follows the XDG Base Directory spec: configuration is portable, but credentials are sensitive user data with their own permission model.
+For the kilo-me bundle, secrets live at `~/.kilo-me/data/kilo/auth.json` (i.e. `$XDG_DATA_HOME/kilo/auth.json` after the `kilo-me` shim has redirected `XDG_DATA_HOME`) — separate from the config files at `~/.kilo-me/config/kilo/`. This follows the XDG Base Directory spec: configuration is portable, but credentials are sensitive user data with their own permission model.
 
 ### Authenticating
 
-Use Kilo's own `kilo auth login` flow — it walks you through provider selection and writes the right shape into `auth.json` with `chmod 600`. The MCP servers and helper scripts in this stack read whatever Kilo wrote; we no longer ship a custom wrapper to bootstrap the file from environment variables.
+`bash install.sh` prompts for the OpenRouter inference and management keys on first run and writes them with `chmod 600`. Re-running the installer keeps existing values (press Enter on a prompt to leave it untouched) or overwrites them if you paste a new value. You can also run `kilo auth login` (Kilo's own flow) at any time — both code paths produce a compatible `auth.json` shape, and the MCP servers will read whichever is present.
 
 ### Schema
 
@@ -375,9 +396,9 @@ Only `openrouter.key` is required. `OPENROUTER_ADMIN_KEY` is optional but unlock
 Every consumer (MCP servers, refresh script, sync script) follows the same precedence:
 
 1. **Existing environment variable** — if `OPENROUTER_API_KEY` is already set in the shell, that wins. The file never overrides shell exports.
-2. **`$AUTH_FILE`** — explicit override path.
-3. **`$XDG_DATA_HOME/kilo/auth.json`**.
-4. **`~/.local/share/kilo/auth.json`** — the default.
+2. **`$AUTH_FILE`** — explicit override path. The `kilo-me` shim sets this to `~/.kilo-me/data/kilo/auth.json`.
+3. **`$XDG_DATA_HOME/kilo/auth.json`** — the shim points `XDG_DATA_HOME` at `~/.kilo-me/data`, so this resolves to the kilo-me location.
+4. **`~/.local/share/kilo/auth.json`** — fallback for plain `kilo` invocations.
 
 This means you can keep a key in your shell rc *and* in auth.json without conflict — shell wins, and removing it from the shell automatically falls through to the file.
 
@@ -420,7 +441,7 @@ Every MCP server and helper script starts with a metadata block like this:
 When Kilo invokes the MCP server, the command in `kilo.jsonc` is:
 
 ```jsonc
-"command": ["uv", "run", "--script", "/Users/you/.config/kilo/mcp_servers/sqlite_memory/server.py"]
+"command": ["uv", "run", "--script", "/Users/you/.kilo-me/config/kilo/mcp_servers/sqlite_memory/server.py"]
 ```
 
 uv reads the metadata, resolves dependencies into a per-script lockfile, and creates an ephemeral cached venv. Subsequent runs are fast (deps already cached). No global `pip install`, no `requirements.txt` to keep in sync, no venv to activate — and each script's deps are independent, so an upgrade to one doesn't risk breaking another.
@@ -509,15 +530,15 @@ A pattern graduates to GitHub when:
 2. They span at least **2 distinct days**
 3. At least one has a Mermaid diagram in `mermaid-vector`
 
-The Memory Curator agent writes a file at `~/.config/kilo/decisions/<kebab-title>.md`. `make sync-bp` (or the cron) pushes it via `gh pr create` to `BP_REPO_PATH`. Promotion writes also create a `Decision` node and a `PROMOTED_TO` edge in the graph store.
+The Memory Curator agent writes a file at `~/.kilo-me/config/kilo/decisions/<kebab-title>.md`. `make sync-bp` (or the cron) pushes it via `gh pr create` to `BP_REPO_PATH`. Promotion writes also create a `Decision` node and a `PROMOTED_TO` edge in the graph store.
 
 ## Repo layout
 
 ```
 kilo-me/                                # repo root
-├── install.sh                          # Global installer (deploys to ~/.config/kilo/)
+├── install.sh                          # Global installer (deploys to ~/.kilo-me/ + drops kilo-me shim)
 ├── uninstall.sh                        # Clean removal (preserves user data + auth.json)
-├── auth.json.example                   # Template for ~/.local/share/kilo/auth.json
+├── auth.json.example                   # Template for ~/.kilo-me/data/kilo/auth.json
 ├── CHANGELOG.md                        # Keep-a-Changelog log of releases
 ├── TODO.md                             # Active work tracker
 ├── .kilo/                              # TEMPLATE — installer copies most of this to $KILO_HOME
@@ -551,35 +572,42 @@ kilo-me/                                # repo root
 After global install, the runtime layout is:
 
 ```
-~/.config/kilo/                 # Code + config + state
-├── kilo.jsonc
-├── mcp.json
-├── agents/
-├── rules/
-├── mcp_servers/
-├── scripts/
-├── memory.sqlite               # SQLite prompt store
-├── chroma/                     # ChromaDB embeddings
-├── graph.kuzu/                 # Kuzu graph DB
-├── models.curated.json         # OpenRouter catalog cache
-└── decisions/                  # Promoted patterns awaiting sync
+~/.kilo-me/                     # Install root (override with KILO_ME_BASE)
+├── config/kilo/                # Code + config (the kilo-me shim points XDG_CONFIG_HOME here)
+│   ├── kilo.jsonc
+│   ├── mcp.json
+│   ├── agents/
+│   ├── rules/
+│   ├── mcp_servers/
+│   ├── scripts/
+│   ├── memory.sqlite           # SQLite prompt store
+│   ├── chroma/                 # ChromaDB embeddings
+│   ├── graph.kuzu/             # Kuzu graph DB
+│   ├── models.curated.json     # OpenRouter catalog cache
+│   └── decisions/              # Promoted patterns awaiting sync
+├── data/kilo/                  # Credentials (XDG_DATA_HOME)
+│   └── auth.json               # chmod 600, written by install.sh on first run
+└── state/kilo/                 # Per-agent state (XDG_STATE_HOME)
+    └── model.json              # Per-agent model pinning
 
-~/.local/share/kilo/            # Credentials (XDG_DATA_HOME)
-└── auth.json                   # chmod 600, written by `kilo auth login`
+~/.local/bin/kilo-me            # Wrapper shim — exports the XDG_*_HOME triple, exec's kilo
 ```
+
+`~/.config/kilo/` is intentionally NOT touched by this installer — that directory belongs to vanilla `kilo`, which is left running with Kilo Code's stock defaults.
 
 ## Make targets
 
 Run `make help` for the full list. Highlights:
 
-- `make install-global` — deploy to `~/.config/kilo/`
-- `make where` — show all paths (including auth.json)
+- `make install-global` — deploy to `~/.kilo-me/` and drop the `kilo-me` shim
+- `make where` — show all paths (including auth.json and the wrapper)
+- `make wrapper-status` — confirm the `kilo-me` shim exists and is on PATH
 - `make auth-status` — show which keys are loaded from auth.json
-- `make refresh-models` — refresh the catalog (uses `~/.config/kilo/` by default)
+- `make refresh-models` — refresh the catalog
 - `make sync-bp` — push promoted patterns to GitHub
 - `make memory-status` / `make chroma-status` / `make graph-status` — diagnostics
 - `make uninstall` — remove code+config but keep user data
-- `make uninstall-purge` — remove everything
+- `make uninstall-purge` — remove everything (including the `kilo-me` shim)
 
 Per-project cost tracking:
 - `make project-init` — provision a per-project OpenRouter sub-key (uses admin key)

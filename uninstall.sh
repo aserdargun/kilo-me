@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# uninstall.sh — remove kilo-me from ~/.config/kilo/ + ~/.local/share/kilo/
+# uninstall.sh — remove kilo-me from ~/.kilo-me/ and ~/.local/bin/kilo-me
 #
 # By default this REMOVES code and config but PRESERVES your user data and
 # credentials:
-#   - $KILO_HOME/memory.sqlite      (prompt history)
+#   - $KILO_HOME/memory.sqlite       (prompt history)
 #   - $KILO_HOME/chroma/             (Mermaid embeddings)
 #   - $KILO_HOME/decisions/          (promoted patterns awaiting sync)
 #   - $KILO_DATA_HOME/auth.json      (your API keys)
+#   - $KILO_STATE_HOME/model.json    (per-agent model pinning)
+#   - $KILO_ME_SHIM                  (the kilo-me wrapper itself — removed only on --purge)
 #
-# Pass --purge to also delete user data + credentials. Pass --keep-auth (with
-# --purge) to remove user data but preserve auth.json — useful for re-installs.
+# Pass --purge to also delete user data, credentials, the state dir, AND the
+# `kilo-me` wrapper on PATH. Pass --keep-auth (with --purge) to remove user
+# data but preserve auth.json — useful for re-installs.
 #
 # On Windows (Git Bash / MSYS), running kilo.exe processes hold SQLite/Kuzu
 # files open and rm fails with "Device or resource busy". Pass --kill to
@@ -19,10 +22,13 @@
 
 set -euo pipefail
 
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-KILO_HOME="${KILO_HOME:-$XDG_CONFIG_HOME/kilo}"
-KILO_DATA_HOME="${KILO_DATA_HOME:-$XDG_DATA_HOME/kilo}"
+# Match install.sh's defaults — install root is ~/.kilo-me/, NOT the system XDG
+# defaults (those belong to vanilla Kilo).
+KILO_ME_BASE="${KILO_ME_BASE:-$HOME/.kilo-me}"
+KILO_HOME="${KILO_HOME:-$KILO_ME_BASE/config/kilo}"
+KILO_DATA_HOME="${KILO_DATA_HOME:-$KILO_ME_BASE/data/kilo}"
+KILO_STATE_HOME="${KILO_STATE_HOME:-$KILO_ME_BASE/state/kilo}"
+KILO_ME_SHIM="${KILO_ME_SHIM:-$HOME/.local/bin/kilo-me}"
 
 PURGE=0
 KEEP_AUTH=0
@@ -79,8 +85,8 @@ if [ "$KILL" = "1" ]; then
   kill_kilo_processes
 fi
 
-if [ ! -d "$KILO_HOME" ] && [ ! -d "$KILO_DATA_HOME" ]; then
-  echo "nothing to uninstall — neither $KILO_HOME nor $KILO_DATA_HOME exists"
+if [ ! -d "$KILO_HOME" ] && [ ! -d "$KILO_DATA_HOME" ] && [ ! -d "$KILO_STATE_HOME" ] && [ ! -e "$KILO_ME_SHIM" ]; then
+  echo "nothing to uninstall — none of $KILO_HOME, $KILO_DATA_HOME, $KILO_STATE_HOME, $KILO_ME_SHIM exist"
   exit 0
 fi
 
@@ -105,12 +111,28 @@ if [ "$PURGE" = "1" ]; then
     echo "purging $KILO_DATA_HOME (entire tree)"
     rm -rf "$KILO_DATA_HOME"
   fi
+  if [ -d "$KILO_STATE_HOME" ]; then
+    echo "purging $KILO_STATE_HOME (entire tree)"
+    rm -rf "$KILO_STATE_HOME"
+  fi
 
   if [ -n "$STASHED_AUTH" ]; then
     mkdir -p "$KILO_DATA_HOME"
     mv "$STASHED_AUTH" "$KILO_DATA_HOME/auth.json"
     chmod 600 "$KILO_DATA_HOME/auth.json"
     echo "restored auth.json → $KILO_DATA_HOME/auth.json"
+  fi
+
+  # Tidy the install root if it's empty after the above.
+  if [ -d "$KILO_ME_BASE" ] && [ -z "$(ls -A "$KILO_ME_BASE" 2>/dev/null)" ]; then
+    rmdir "$KILO_ME_BASE"
+    echo "removed empty $KILO_ME_BASE"
+  fi
+
+  # Remove the kilo-me wrapper from PATH.
+  if [ -e "$KILO_ME_SHIM" ]; then
+    echo "removing $KILO_ME_SHIM"
+    rm -f "$KILO_ME_SHIM"
   fi
 else
   # -----------------------------------------------------------------------------
@@ -143,6 +165,14 @@ else
     echo "removed empty $KILO_DATA_HOME"
   elif [ -d "$KILO_DATA_HOME" ]; then
     echo "kept $KILO_DATA_HOME (contains auth.json — pass --purge to remove)"
+  fi
+
+  if [ -d "$KILO_STATE_HOME" ]; then
+    echo "kept $KILO_STATE_HOME (contains model.json — pass --purge to remove)"
+  fi
+
+  if [ -e "$KILO_ME_SHIM" ]; then
+    echo "kept $KILO_ME_SHIM (the kilo-me wrapper — pass --purge to remove)"
   fi
 fi
 

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`kilo-me` wrapper command** (`~/.local/bin/kilo-me`) — bash shim that exports `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` at `~/.kilo-me/{config,data,state}` and exec's `kilo`. Lets users keep plain `kilo` for stock Kilo Code behavior and opt into this bundle by running `kilo-me`. Override the install root with `KILO_ME_BASE`. Drop the shim with `bash uninstall.sh --purge`.
+- `make wrapper-status` target — verifies the shim exists, is executable, and is on `PATH`.
+- `install.sh` interactive prompt for OpenRouter inference + management keys on first run; existing values are preserved on re-runs (press Enter to keep). Skip with `KILO_SKIP_AUTH_PROMPT=1`. Auth.json is written with `"type": "api"` so Kilo's runtime accepts it.
+- `uninstall.sh --kill` flag (Git Bash / MSYS only) to taskkill running `kilo.exe` processes before removing files; releases SQLite/Kuzu file locks that would otherwise yield "Device or resource busy".
 - `-us` agent lineup (`architect-us`, `coder-us`, `debugger-us`, `memory-curator-us`, `cheap-fallback-us`) reachable by full name; built-in slots remain on the `-ch` defaults.
 - `cheap-fallback-ch.md` and `ask.md` agent prompts (previously `cheap-fallback` lived only in `kilo.jsonc`; there was no `ask` agent at all).
 - `graph-memory` MCP server backed by embedded Kuzu — node tables for `Prompt`, `Agent`, `Tag`, `Diagram`, `Decision`, `Pattern`; rel tables for `LOGGED_BY`, `TAGGED`, `DEPICTS`, `PROMOTED_TO`, `DERIVES`. Memory Curator agents write to it after every task.
@@ -19,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `kuzu>=0.4.0` in `[project.optional-dependencies] dev` for tests.
 
 ### Changed
+- **Breaking: install root relocated** from `~/.config/kilo/` (Kilo's default XDG path) to `~/.kilo-me/config/kilo/`, with parallel data/state moves to `~/.kilo-me/data/kilo/` and `~/.kilo-me/state/kilo/`. Plain `kilo` now reads its own untouched `~/.config/kilo/` and behaves like a fresh Kilo Code install; this repo's bundle is reachable only via the new `kilo-me` shim. Existing installs are detected by `install.sh` and a one-line `mv` migration hint is printed (no auto-move). Update env-var defaults across `install.sh`, `uninstall.sh`, and `Makefile`. Update `README.md` paths and add a Migration section.
 - **Project renamed** `kilo-zh-stack` → `kilo-me`; `pyproject.toml` `name`, version bumped to `0.3.0`, and every README/CLAUDE/agent-prompt/script reference updated.
 - Agent files renamed `*-zh.md` → `*-ch.md`. `memory-curator.md` → `memory-curator-ch.md`.
 - `architect-ch.md` frontmatter `model:` aligned to `openrouter/deepseek/deepseek-v4-pro` (previously diverged from `kilo.jsonc`).
