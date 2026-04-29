@@ -11,6 +11,10 @@
 #
 # Pass --purge to also delete user data + credentials. Pass --keep-auth (with
 # --purge) to remove user data but preserve auth.json — useful for re-installs.
+#
+# On Windows (Git Bash / MSYS), running kilo.exe processes hold SQLite/Kuzu
+# files open and rm fails with "Device or resource busy". Pass --kill to
+# taskkill any kilo.exe processes before removal.
 # =============================================================================
 
 set -euo pipefail
@@ -22,24 +26,58 @@ KILO_DATA_HOME="${KILO_DATA_HOME:-$XDG_DATA_HOME/kilo}"
 
 PURGE=0
 KEEP_AUTH=0
+KILL=0
 
 for arg in "$@"; do
   case "$arg" in
     --purge)     PURGE=1 ;;
     --keep-auth) KEEP_AUTH=1 ;;
+    --kill)      KILL=1 ;;
     -h|--help)
       cat <<USAGE
-Usage: $0 [--purge] [--keep-auth]
+Usage: $0 [--purge] [--keep-auth] [--kill]
 
   --purge       also delete memory.sqlite, chroma/, decisions/, AND auth.json
   --keep-auth   when used with --purge, preserve auth.json
                 (no effect without --purge — auth.json is preserved by default)
+  --kill        on Windows, taskkill any running kilo.exe processes before
+                removing files (frees SQLite/Kuzu locks). No-op on non-Windows.
 USAGE
       exit 0
       ;;
     *) echo "unknown arg: $arg" >&2; exit 1 ;;
   esac
 done
+
+# -----------------------------------------------------------------------------
+# Windows file-lock helper: kilo.exe (and child uv/python processes spawned by
+# the MCP servers) hold memory.sqlite, kilo.db, and the Kuzu graph dir open.
+# On Git Bash / MSYS, removing them mid-run yields "Device or resource busy".
+# --kill uses taskkill to force-terminate them before we touch the filesystem.
+# -----------------------------------------------------------------------------
+kill_kilo_processes() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) return 0 ;;  # non-Windows: nothing to do
+  esac
+  if ! command -v taskkill >/dev/null 2>&1; then
+    echo "warning: --kill requested but taskkill not on PATH; skipping" >&2
+    return 0
+  fi
+  local killed=0
+  for img in kilo.exe; do
+    if tasklist 2>/dev/null | grep -qi "^$img"; then
+      echo "killing running $img processes"
+      taskkill //F //IM "$img" >/dev/null 2>&1 || true
+      killed=1
+    fi
+  done
+  [ "$killed" = "1" ] || echo "no kilo.exe processes running"
+}
+
+if [ "$KILL" = "1" ]; then
+  kill_kilo_processes
+fi
 
 if [ ! -d "$KILO_HOME" ] && [ ! -d "$KILO_DATA_HOME" ]; then
   echo "nothing to uninstall — neither $KILO_HOME nor $KILO_DATA_HOME exists"

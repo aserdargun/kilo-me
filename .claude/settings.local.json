@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tasklist)",
+      "Bash(taskkill *)",
+      "Read(//c/Users/serdar.gundogdu/.local/share/kilo//**)",
+      "Read(//c/Users/serdar.gundogdu/.config/**)",
+      "Bash(rm -rf /c/Users/serdar.gundogdu/.local/share/kilo)",
+      "Read(//c/Users/serdar.gundogdu/.local/share/kilo/**)"
+    ]
+  }
+}
