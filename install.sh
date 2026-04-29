@@ -176,7 +176,11 @@ MODEL_JSON="$KILO_STATE_HOME/model.json"
 
 log "patching $MODEL_JSON — pinning -ch agents"
 mkdir -p "$KILO_STATE_HOME"
-python3 - "$MODEL_JSON" <<'PYEOF'
+# Use `uv run python` so we don't depend on a `python3` binary being on PATH —
+# on Windows the bare `python3` invocation hits the Microsoft Store shim when
+# Python is installed as `python.exe` / via the `py` launcher. uv was already
+# verified at step 1, so this is portable across Linux/macOS/Git Bash.
+uv run --no-project python - "$MODEL_JSON" <<'PYEOF'
 import json, sys
 
 path = sys.argv[1]
