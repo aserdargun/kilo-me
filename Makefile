@@ -100,7 +100,7 @@ chroma-reset: ## DESTRUCTIVE: wipe the ChromaDB collection
 
 graph-status: ## Show Kuzu graph node + edge counts per label
 	GRAPH_DB_PATH="$(KILO_HOME)/graph.kuzu" uv run --script mcp_servers/graph_memory/server.py --init >/dev/null 2>&1 && \
-	  uv run python -c "import importlib.util, json; \
+	  GRAPH_DB_PATH="$(KILO_HOME)/graph.kuzu" uv run --with kuzu --with fastmcp python -c "import importlib.util, json; \
 	  spec = importlib.util.spec_from_file_location('g', 'mcp_servers/graph_memory/server.py'); \
 	  mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); \
 	  print(json.dumps(mod.stats(), indent=2))"
