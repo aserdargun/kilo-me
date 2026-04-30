@@ -39,3 +39,9 @@ Active work tracker for **kilo-me**. Move items to `CHANGELOG.md`'s `[Unreleased
 - [ ] `graph-memory.delete_node` + cascade delete for pruning bad ingests.
 - [ ] CI workflow that runs `make test` + `make lint` across macOS, Linux, and WSL2.
 - [ ] Auto-generate `AGENTS.md` from `kilo.jsonc` so the matrix never drifts.
+
+
+# My Development and Issue ideas
+* Always enrich task with Chatgpt 5.4 model before start.
+* Generate an accounting subagent which will calculate created project costs and durations. It will store up to date USAGE.md file.
+* Every agent should have fallback agents up to a config plan in kilo-me app. It should have 5 alternatives for each agents.
