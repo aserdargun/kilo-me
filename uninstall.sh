@@ -129,10 +129,14 @@ if [ "$PURGE" = "1" ]; then
     echo "removed empty $KILO_ME_BASE"
   fi
 
-  # Remove the kilo-me wrapper from PATH.
+  # Remove the kilo-me wrapper from PATH (bash shim + the Windows .cmd companion).
   if [ -e "$KILO_ME_SHIM" ]; then
     echo "removing $KILO_ME_SHIM"
     rm -f "$KILO_ME_SHIM"
+  fi
+  if [ -e "${KILO_ME_SHIM}.cmd" ]; then
+    echo "removing ${KILO_ME_SHIM}.cmd"
+    rm -f "${KILO_ME_SHIM}.cmd"
   fi
 else
   # -----------------------------------------------------------------------------

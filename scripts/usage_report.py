@@ -159,6 +159,34 @@ def _read_project_state() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _parse_ts(ts: str) -> float | None:
+    """Parse an ISO-8601 UTC timestamp ('YYYY-MM-DDTHH:MM:SSZ') to a UNIX float."""
+    if not isinstance(ts, str):
+        return None
+    from datetime import datetime, timezone
+    try:
+        # The logger writes a 'Z' suffix; datetime.fromisoformat accepts it
+        # from Python 3.11 onward, so normalize for 3.10 compatibility.
+        normalized = ts.rstrip("Z") + "+00:00" if ts.endswith("Z") else ts
+        return datetime.fromisoformat(normalized).replace(tzinfo=timezone.utc).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _fmt_duration(seconds: float | None) -> str:
+    if seconds is None or seconds < 0:
+        return "—"
+    if seconds < 1:
+        return "<1s"
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    minutes, sec = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m{sec:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
 def _read_prompt_log() -> list[dict[str, Any]]:
     """Pair start/end snapshots from ./USAGE.log.jsonl into per-prompt rows."""
     p = Path(os.environ.get("USAGE_LOG_PATH") or (Path.cwd() / "USAGE.log.jsonl"))
@@ -181,12 +209,16 @@ def _read_prompt_log() -> list[dict[str, Any]]:
             starts[pid] = row
         elif row.get("phase") == "end" and pid in starts:
             s = starts.pop(pid)
+            t0 = _parse_ts(s["ts"])
+            t1 = _parse_ts(row["ts"])
+            duration_s = (t1 - t0) if (t0 is not None and t1 is not None) else None
             pairs.append({
                 "prompt_id": pid,
                 "agent": row.get("agent") or s.get("agent"),
                 "started": s["ts"],
                 "ended": row["ts"],
                 "cost": float(row["key_usage"]) - float(s["key_usage"]),
+                "duration_s": duration_s,
             })
     return pairs
 
@@ -476,40 +508,56 @@ def _render(
     lines.append(f"| Account remaining balance | {_fmt_usd(remaining)} |")
     lines.append("")
 
-    # ── Per-prompt costs (from USAGE.log.jsonl, written by usage_log.py) ──
+    # ── Per-prompt costs + durations (from USAGE.log.jsonl) ───────────────
     if prompt_pairs:
         total = sum(p["cost"] for p in prompt_pairs)
+        timed = [p for p in prompt_pairs if p.get("duration_s") is not None]
+        total_duration = sum(p["duration_s"] for p in timed) if timed else None
+
         by_agent: dict[str, dict[str, float]] = {}
         for p in prompt_pairs:
             a = p.get("agent") or "unknown"
-            slot = by_agent.setdefault(a, {"cost": 0.0, "count": 0})
+            slot = by_agent.setdefault(a, {"cost": 0.0, "count": 0, "duration": 0.0, "timed": 0})
             slot["cost"] += p["cost"]
             slot["count"] += 1
+            if p.get("duration_s") is not None:
+                slot["duration"] += p["duration_s"]
+                slot["timed"] += 1
 
         lines.append("## Per-prompt costs")
         lines.append("")
-        lines.append(f"_Sourced from `USAGE.log.jsonl` — {len(prompt_pairs)} completed prompt(s), "
-                     f"total {_fmt_usd(total)}._")
+        summary = (f"_Sourced from `USAGE.log.jsonl` — {len(prompt_pairs)} completed "
+                   f"prompt(s), total {_fmt_usd(total)}")
+        if total_duration is not None:
+            summary += f", wall-clock {_fmt_duration(total_duration)}"
+        summary += "._"
+        lines.append(summary)
         lines.append("")
 
         lines.append("### By agent")
         lines.append("")
-        lines.append("| Agent | Prompts | Total cost | Avg / prompt |")
-        lines.append("| --- | ---: | ---: | ---: |")
+        lines.append("| Agent | Prompts | Total cost | Avg / prompt | Total time | Avg time |")
+        lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
         for agent, s in sorted(by_agent.items(), key=lambda kv: kv[1]["cost"], reverse=True):
-            avg = s["cost"] / s["count"] if s["count"] else 0.0
-            lines.append(f"| {agent} | {_fmt_int(s['count'])} | {_fmt_usd(s['cost'])} | {_fmt_usd(avg)} |")
+            avg_cost = s["cost"] / s["count"] if s["count"] else 0.0
+            total_t = s["duration"] if s["timed"] else None
+            avg_t = (s["duration"] / s["timed"]) if s["timed"] else None
+            lines.append(
+                f"| {agent} | {_fmt_int(s['count'])} | {_fmt_usd(s['cost'])} | "
+                f"{_fmt_usd(avg_cost)} | {_fmt_duration(total_t)} | {_fmt_duration(avg_t)} |"
+            )
         lines.append("")
 
         top = sorted(prompt_pairs, key=lambda p: p["cost"], reverse=True)[:10]
         lines.append("### Top 10 most expensive prompts")
         lines.append("")
-        lines.append("| Cost | Agent | Prompt id | Started | Ended |")
-        lines.append("| ---: | --- | --- | --- | --- |")
+        lines.append("| Cost | Duration | Agent | Prompt id | Started | Ended |")
+        lines.append("| ---: | ---: | --- | --- | --- | --- |")
         for p in top:
             lines.append(
-                f"| {_fmt_usd(p['cost'])} | {p.get('agent') or '?'} | "
-                f"`{p['prompt_id']}` | {p['started']} | {p['ended']} |"
+                f"| {_fmt_usd(p['cost'])} | {_fmt_duration(p.get('duration_s'))} | "
+                f"{p.get('agent') or '?'} | `{p['prompt_id']}` | "
+                f"{p['started']} | {p['ended']} |"
             )
         lines.append("")
 

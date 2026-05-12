@@ -12,7 +12,12 @@
       "Bash(bash -n /c/Users/serdar.gundogdu/github-personal/kilo-me/uninstall.sh)",
       "Bash(make -C /c/Users/serdar.gundogdu/github-personal/kilo-me -n where)",
       "Bash(make -C /c/Users/serdar.gundogdu/github-personal/kilo-me -n wrapper-status)",
-      "Bash(cat *)"
+      "Bash(cat *)",
+      "Bash(git *)",
+      "Bash(bash -n /Users/aserdargun/Projects/kilo-me/install.sh)",
+      "Bash(bash -n /Users/aserdargun/Projects/kilo-me/uninstall.sh)",
+      "Bash(chmod +x *)",
+      "Bash(uv run *)"
     ]
   }
 }

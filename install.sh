@@ -45,6 +45,35 @@ KILO_STATE_HOME="${KILO_STATE_HOME:-$KILO_ME_BASE/state/kilo}"
 AUTH_FILE="${AUTH_FILE:-$KILO_DATA_HOME/auth.json}"
 KILO_ME_SHIM="${KILO_ME_SHIM:-$HOME/.local/bin/kilo-me}"
 
+# -----------------------------------------------------------------------------
+# Platform detection + path normalization.
+#
+# On Git Bash / MSYS, $HOME and $KILO_HOME look like /c/Users/<name>/... — a
+# POSIX path only MSYS itself understands. The bash installer reads/writes
+# files happily with these paths, but `kilo.exe` (a native Windows process)
+# spawned by the user later does NOT translate them. If we bake MSYS paths
+# into kilo.jsonc / mcp.json or export them via the shim, Kilo silently fails
+# to launch the MCP servers (it spawns `uv run --script /c/Users/.../server.py`
+# which native uv.exe can't resolve).
+#
+# `to_native()` converts a path to Windows mixed-mode (C:/Users/...) on MSYS
+# and is a no-op everywhere else. Mixed mode is the right target: forward
+# slashes need no JSON escaping AND native Windows tooling accepts them.
+# -----------------------------------------------------------------------------
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
+  *)                    IS_WINDOWS=0 ;;
+esac
+
+to_native() {
+  # Echo $1 in Windows mixed-mode on MSYS, unchanged elsewhere.
+  if [ "$IS_WINDOWS" = "1" ] && command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 # ANSI-C quoting: $'...' interprets \033 at definition time, so the variable
 # holds the actual ESC byte. This lets the value render correctly via both
 # printf (used in log/warn/die) AND heredocs (used in the completion banner).
@@ -173,6 +202,7 @@ else
   # Pull existing values so re-running install.sh doesn't clobber them on empty input.
   EXISTING_INF=""
   EXISTING_ADMIN=""
+  EXISTING_OPENAI=""
   if [ -f "$AUTH_FILE" ]; then
     EXISTING_INF=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
 import json, sys
@@ -195,23 +225,37 @@ except Exception:
 print(d.get("OPENROUTER_ADMIN_KEY", ""))
 PYEOF
 )
+    EXISTING_OPENAI=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+v = (d.get("openai") or {}).get("key") or d.get("OPENAI_API_KEY") or ""
+print(v)
+PYEOF
+)
   fi
 
   log "configuring $AUTH_FILE — paste keys (input hidden); press Enter to keep existing"
   OR_INFERENCE_KEY=$(prompt_secret "OpenRouter API key (inference, sk-or-v1-…)" "$EXISTING_INF")
   OR_ADMIN_KEY=$(prompt_secret "OpenRouter management key (sk-or-mgmt-… or sk-or-v1-…)" "$EXISTING_ADMIN")
+  OPENAI_KEY=$(prompt_secret "OpenAI API key for task-enricher / gpt-5.4 (sk-…)" "$EXISTING_OPENAI")
 
-  if [ -z "$OR_INFERENCE_KEY" ] && [ -z "$OR_ADMIN_KEY" ]; then
+  if [ -z "$OR_INFERENCE_KEY" ] && [ -z "$OR_ADMIN_KEY" ] && [ -z "$OPENAI_KEY" ]; then
     warn "  no keys provided — leaving auth.json untouched"
   else
     AUTH_FILE="$AUTH_FILE" \
     OR_INFERENCE_KEY="$OR_INFERENCE_KEY" \
     OR_ADMIN_KEY="$OR_ADMIN_KEY" \
+    OPENAI_KEY="$OPENAI_KEY" \
     uv run --no-project python - <<'PYEOF'
 import json, os, pathlib
 path = pathlib.Path(os.environ["AUTH_FILE"])
 inf = os.environ.get("OR_INFERENCE_KEY", "")
 admin = os.environ.get("OR_ADMIN_KEY", "")
+oai = os.environ.get("OPENAI_KEY", "")
 data = {}
 if path.exists():
     try:
@@ -226,6 +270,13 @@ if inf:
     prov["key"] = inf
 if admin:
     data["OPENROUTER_ADMIN_KEY"] = admin
+if oai:
+    # Same shape as openrouter so Kilo treats it as a first-class provider,
+    # plus the flat OPENAI_API_KEY for the task-enricher MCP server.
+    prov = data.setdefault("openai", {})
+    prov["type"] = "api"
+    prov["key"] = oai
+    data["OPENAI_API_KEY"] = oai
 path.write_text(json.dumps(data, indent=2) + "\n")
 try:
     os.chmod(path, 0o600)
@@ -242,13 +293,16 @@ fi
 render() {
   local src="$1" dst="$2"
   # Replace __KILO_HOME__ with the actual path. sed -i differs across BSD/GNU,
-  # so we use a temp file.
-  sed "s|__KILO_HOME__|${KILO_HOME}|g" "$src" > "$dst.tmp" && mv "$dst.tmp" "$dst"
+  # so we use a temp file. We feed in the *native* form so Windows kilo.exe
+  # can spawn uv with an absolute path it actually understands (mixed-mode
+  # C:/Users/... rather than the MSYS-only /c/Users/... form).
+  sed "s|__KILO_HOME__|${KILO_HOME_NATIVE}|g" "$src" > "$dst.tmp" && mv "$dst.tmp" "$dst"
 }
 
+KILO_HOME_NATIVE="$(to_native "$KILO_HOME")"
 render "$SRC_DIR/.kilo/kilo.jsonc" "$KILO_HOME/kilo.jsonc"
 render "$SRC_DIR/.kilo/mcp.json"   "$KILO_HOME/mcp.json"
-log "rendered kilo.jsonc and mcp.json with KILO_HOME=$KILO_HOME"
+log "rendered kilo.jsonc and mcp.json with KILO_HOME=$KILO_HOME_NATIVE"
 
 # Make scripts executable
 chmod +x "$KILO_HOME"/mcp_servers/*/server.py 2>/dev/null || true
@@ -260,7 +314,7 @@ chmod +x "$KILO_HOME"/scripts/*.py 2>/dev/null || true
 #    (forces dep download once, so the first MCP call doesn't time out)
 # -----------------------------------------------------------------------------
 log "pre-warming uv caches for MCP servers (first run downloads deps)"
-for srv in sqlite_memory openrouter_models mermaid_vector graph_memory; do
+for srv in sqlite_memory openrouter_models mermaid_vector graph_memory task_enricher; do
   printf "  - %-20s " "$srv"
   # `timeout` lets uv resolve+download deps, then kills the blocking MCP server
   # process before it hangs waiting on stdin. Exit code 124 = timed out = ok.
@@ -336,6 +390,7 @@ m["architect-ch"]      = {"providerID": "openrouter", "modelID": "deepseek/deeps
 m["debugger-ch"]       = {"providerID": "openrouter", "modelID": "z-ai/glm-5.1"}
 m["memory-curator-ch"] = {"providerID": "openrouter", "modelID": "qwen/qwen3.6-plus"}
 m["cheap-fallback-ch"] = {"providerID": "openrouter", "modelID": "deepseek/deepseek-v3.2"}
+m["accountant-ch"]     = {"providerID": "openrouter", "modelID": "deepseek/deepseek-v3.2"}
 
 # Western frontier lineup
 m["coder-us"]          = {"providerID": "openai",     "modelID": "gpt-5.4"}
@@ -343,6 +398,7 @@ m["architect-us"]      = {"providerID": "openrouter", "modelID": "anthropic/clau
 m["debugger-us"]       = {"providerID": "openrouter", "modelID": "anthropic/claude-sonnet-4.6"}
 m["memory-curator-us"] = {"providerID": "openrouter", "modelID": "anthropic/claude-haiku-4.5"}
 m["cheap-fallback-us"] = {"providerID": "openrouter", "modelID": "x-ai/grok-4.1-fast"}
+m["accountant-us"]     = {"providerID": "openrouter", "modelID": "anthropic/claude-haiku-4.5"}
 
 with open(path, "w") as f:
     json.dump(state, f, indent=2)
@@ -357,12 +413,18 @@ log "  ok: $MODEL_JSON"
 # -----------------------------------------------------------------------------
 log "writing $KILO_ME_SHIM"
 mkdir -p "$(dirname "$KILO_ME_SHIM")"
+
+# On Windows, `kilo` is `kilo.exe` and won't translate MSYS-style env vars.
+# Bake the native (mixed-mode) path of $KILO_ME_BASE into the shim so the
+# XDG_*_HOME values it exports are something kilo.exe can resolve.
+KILO_ME_BASE_NATIVE="$(to_native "$KILO_ME_BASE")"
+
 cat > "$KILO_ME_SHIM" <<SHIM
 #!/usr/bin/env bash
 # kilo-me — launch Kilo Code with the kilo-me bundle.
 # Generated by install.sh; safe to regenerate by re-running the installer.
 set -e
-KILO_ME_BASE="\${KILO_ME_BASE:-$KILO_ME_BASE}"
+KILO_ME_BASE="\${KILO_ME_BASE:-$KILO_ME_BASE_NATIVE}"
 export XDG_CONFIG_HOME="\$KILO_ME_BASE/config"
 export XDG_DATA_HOME="\$KILO_ME_BASE/data"
 export XDG_STATE_HOME="\$KILO_ME_BASE/state"
@@ -372,6 +434,34 @@ exec kilo "\$@"
 SHIM
 chmod +x "$KILO_ME_SHIM"
 log "  ok: $KILO_ME_SHIM"
+
+# Windows: drop a CMD companion alongside the bash shim so PowerShell / cmd.exe
+# users can launch kilo-me without going through Git Bash. The .cmd uses the
+# same XDG_*_HOME contract as the bash shim, just in Windows-native form.
+if [ "$IS_WINDOWS" = "1" ]; then
+  KILO_ME_SHIM_CMD="${KILO_ME_SHIM}.cmd"
+  # Convert to backslash form for the CMD batch script — cmd.exe doesn't
+  # consistently expand forward slashes in %VAR% paths during set.
+  if command -v cygpath >/dev/null 2>&1; then
+    KILO_ME_BASE_WIN="$(cygpath -w "$KILO_ME_BASE")"
+  else
+    KILO_ME_BASE_WIN="$KILO_ME_BASE_NATIVE"
+  fi
+  log "writing $KILO_ME_SHIM_CMD (Windows launcher)"
+  cat > "$KILO_ME_SHIM_CMD" <<CMD
+@echo off
+REM kilo-me — launch Kilo Code with the kilo-me bundle (Windows).
+REM Generated by install.sh; safe to regenerate by re-running the installer.
+if "%KILO_ME_BASE%"=="" set "KILO_ME_BASE=${KILO_ME_BASE_WIN}"
+set "XDG_CONFIG_HOME=%KILO_ME_BASE%\\config"
+set "XDG_DATA_HOME=%KILO_ME_BASE%\\data"
+set "XDG_STATE_HOME=%KILO_ME_BASE%\\state"
+set "KILO_HOME=%XDG_CONFIG_HOME%\\kilo"
+set "AUTH_FILE=%XDG_DATA_HOME%\\kilo\\auth.json"
+kilo.exe %*
+CMD
+  log "  ok: $KILO_ME_SHIM_CMD"
+fi
 
 # Warn if ~/.local/bin isn't on PATH so the shim is discoverable.
 case ":${PATH:-}:" in
@@ -394,9 +484,9 @@ ${GRN}===== install complete =====${NC}
   KILO_STATE_HOME = $KILO_STATE_HOME
 
   Config       : $KILO_HOME/kilo.jsonc
-  Agents       : $KILO_HOME/agents/        (architect/coder/debugger/memory-curator × ch+us, plus ask)
-  Rules        : $KILO_HOME/rules/
-  MCP servers  : $KILO_HOME/mcp_servers/   (sqlite-memory, openrouter-models, mermaid-vector, graph-memory)
+  Agents       : $KILO_HOME/agents/        (architect/coder/debugger/memory-curator/accountant × ch+us, plus ask)
+  Rules        : $KILO_HOME/rules/         (01–05; 05 = pre-flight task enrichment via gpt-5.4)
+  MCP servers  : $KILO_HOME/mcp_servers/   (sqlite-memory, openrouter-models, mermaid-vector, graph-memory, task-enricher)
   Memory DB    : $KILO_HOME/memory.sqlite
   ChromaDB     : $KILO_HOME/chroma/
   Graph DB     : $KILO_HOME/graph.kuzu/

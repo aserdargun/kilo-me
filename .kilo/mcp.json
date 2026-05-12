@@ -37,6 +37,16 @@
       },
       "alwaysAllow": ["neighbors", "find_path", "cypher", "stats"],
       "disabled": false
+    },
+    "task-enricher": {
+      "command": "uv",
+      "args": ["run", "--script", "__KILO_HOME__/mcp_servers/task_enricher/server.py"],
+      "env": {
+        "OPENAI_API_KEY": "${env:OPENAI_API_KEY}",
+        "TASK_ENRICH_MODEL": "gpt-5.4"
+      },
+      "alwaysAllow": ["enrich_task", "enrichment_status"],
+      "disabled": false
     }
   }
 }

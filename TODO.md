@@ -41,7 +41,10 @@ Active work tracker for **kilo-me**. Move items to `CHANGELOG.md`'s `[Unreleased
 - [ ] Auto-generate `AGENTS.md` from `kilo.jsonc` so the matrix never drifts.
 
 
-# My Development and Issue ideas
-* Always enrich task with Chatgpt 5.4 model before start.
-* Generate an accounting subagent which will calculate created project costs and durations. It will store up to date USAGE.md file.
+# My Development Ideas and Issues
+* Always enrich task with Chatgpt 5.4 model from openai subscribed before start. COMPLETED
+* Generate an accounting subagent which will calculate created project costs and durations. It will store up to date USAGE.md file. COMPLETED
 * Every agent should have fallback agents up to a config plan in kilo-me app. It should have 5 alternatives for each agents.
+* Generate local cluster using ollama server support on kilo-me. For example, I have Raspberry pi 5 8 gb for routing. I have Mac mini M4 24 gb as soft inferences and I have RTX 4070 Ti Super 16 gb as hard inferences. Build me a plan to implement this.
+* Create local agents for architect-lo, coder-lo, debugger-lo, memory-curator-lo, cheap-fallback-lo. They will use ollama server. My local cluster router will decide task size and it will send task to necessary inferencing device.
+* While I am using this kilo-me wrapped command on windows machine. I encountered mcp not enabling issue. Find root cause and solve this issue.  

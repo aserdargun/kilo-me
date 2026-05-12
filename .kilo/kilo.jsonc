@@ -78,6 +78,11 @@
       "temperature": 0.3,
       "permission": { "edit": "allow", "bash": "ask" }
     },
+    "accountant-ch": {
+      "model": "openrouter/deepseek/deepseek-v3.2",
+      "temperature": 0.1,
+      "permission": { "edit": "ask", "bash": "allow" }
+    },
 
     // ── Western frontier lineup ─────────────────────────────────────────────
     "architect-us": {
@@ -104,6 +109,11 @@
       "model": "openrouter/x-ai/grok-4.1-fast",
       "temperature": 0.3,
       "permission": { "edit": "allow", "bash": "ask" }
+    },
+    "accountant-us": {
+      "model": "openrouter/anthropic/claude-haiku-4.5",
+      "temperature": 0.1,
+      "permission": { "edit": "ask", "bash": "allow" }
     }
   },
 
@@ -145,6 +155,15 @@
       "command": ["uv", "run", "--script", "__KILO_HOME__/mcp_servers/graph_memory/server.py"],
       "environment": {
         "GRAPH_DB_PATH": "__KILO_HOME__/graph.kuzu"
+      },
+      "timeout": 60000,
+      "enabled": true
+    },
+    "task-enricher": {
+      "type": "local",
+      "command": ["uv", "run", "--script", "__KILO_HOME__/mcp_servers/task_enricher/server.py"],
+      "environment": {
+        "TASK_ENRICH_MODEL": "gpt-5.4"
       },
       "timeout": 60000,
       "enabled": true
