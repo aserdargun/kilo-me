@@ -304,6 +304,15 @@ render "$SRC_DIR/.kilo/kilo.jsonc" "$KILO_HOME/kilo.jsonc"
 render "$SRC_DIR/.kilo/mcp.json"   "$KILO_HOME/mcp.json"
 log "rendered kilo.jsonc and mcp.json with KILO_HOME=$KILO_HOME_NATIVE"
 
+# fallbacks.json — Rule 06 model fallback chains. User-editable; preserve any
+# local edits across re-installs by only writing the file when it's absent.
+if [ -f "$KILO_HOME/fallbacks.json" ]; then
+  log "kept existing $KILO_HOME/fallbacks.json (re-install preserves your edits)"
+else
+  cp "$SRC_DIR/.kilo/fallbacks.json" "$KILO_HOME/fallbacks.json"
+  log "wrote $KILO_HOME/fallbacks.json (5-model fallback chain per agent)"
+fi
+
 # Make scripts executable
 chmod +x "$KILO_HOME"/mcp_servers/*/server.py 2>/dev/null || true
 chmod +x "$KILO_HOME"/mcp_servers/mermaid_vector/chroma_init.py 2>/dev/null || true
@@ -485,8 +494,9 @@ ${GRN}===== install complete =====${NC}
 
   Config       : $KILO_HOME/kilo.jsonc
   Agents       : $KILO_HOME/agents/        (architect/coder/debugger/memory-curator/accountant × ch+us, plus ask)
-  Rules        : $KILO_HOME/rules/         (01–05; 05 = pre-flight task enrichment via gpt-5.4)
+  Rules        : $KILO_HOME/rules/         (01–06; 05 = gpt-5.4 task enrichment, 06 = 5-model fallback chain)
   MCP servers  : $KILO_HOME/mcp_servers/   (sqlite-memory, openrouter-models, mermaid-vector, graph-memory, task-enricher)
+  Fallbacks    : $KILO_HOME/fallbacks.json (per-agent 5-model chain — Rule 06)
   Memory DB    : $KILO_HOME/memory.sqlite
   ChromaDB     : $KILO_HOME/chroma/
   Graph DB     : $KILO_HOME/graph.kuzu/

@@ -151,6 +151,7 @@ else
     rm -rf "$KILO_HOME/bin"
     rm -f  "$KILO_HOME/kilo.jsonc"
     rm -f  "$KILO_HOME/mcp.json"
+    rm -f  "$KILO_HOME/fallbacks.json"
     rm -f  "$KILO_HOME/models.curated.json"
     rm -f  "$KILO_HOME"/kilo.jsonc.bak.*
     rm -f  "$KILO_HOME"/refresh.log "$KILO_HOME"/sync.log

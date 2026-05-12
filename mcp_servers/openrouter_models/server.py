@@ -71,6 +71,9 @@ _OR_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 _CACHE_PATH = Path(os.environ.get("MODELS_CACHE_PATH", str(_DEFAULT_CACHE)))
 _TTL_SECONDS = int(os.environ.get("MODELS_TTL_SECONDS", "86400"))  # 24h
 _OR_BASE = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+# Fallback chain file — user-editable per-agent list of {primary, alt1..alt4}.
+# Default lives next to kilo.jsonc; override for tests.
+_FALLBACKS_PATH = Path(os.environ.get("FALLBACKS_PATH", str(_KILO_HOME / "fallbacks.json")))
 # Optional category filter — leave empty to fetch ALL models. Examples:
 # "programming", "roleplay", "vision", "translation". Comma-separated list OK.
 _CATEGORY = os.environ.get("OPENROUTER_CATEGORY", "")
@@ -456,6 +459,146 @@ def cache_status() -> dict[str, Any]:
         "model_count": len(cache.get("models", [])),
         "total_available": cache.get("total_available"),
         "source": cache.get("source"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fallback chains — Rule 06. Each agent has up to 5 model slugs ordered by
+# preference. pick_fallback returns the next viable option, skipping models
+# the caller has already tried. The implementation is intentionally simple:
+# it does NOT probe OpenRouter for live availability (that would defeat the
+# point — fallback is invoked precisely when the network is misbehaving). It
+# DOES cross-reference the curated cache to skip slugs that disappeared from
+# the catalog entirely (renamed / deprecated).
+# ---------------------------------------------------------------------------
+def _load_fallbacks() -> dict[str, list[str]]:
+    """Read fallbacks.json. Returns {} on any error so callers fail soft."""
+    if not _FALLBACKS_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(_FALLBACKS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("could not read %s: %s", _FALLBACKS_PATH, exc)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for agent, chain in data.items():
+        if agent.startswith("_"):
+            continue  # _comment, _schema, etc.
+        if isinstance(chain, list) and all(isinstance(s, str) for s in chain):
+            out[agent] = chain
+    return out
+
+
+def _catalog_slugs() -> set[str]:
+    """OpenRouter ids present in the curated cache (for availability filter)."""
+    cache = _load_cache()
+    if not cache:
+        return set()
+    return {m.get("id", "") for m in cache.get("models", []) if isinstance(m, dict)}
+
+
+def _strip_provider(slug: str) -> str:
+    """'openrouter/deepseek/deepseek-v4-pro' → 'deepseek/deepseek-v4-pro'."""
+    # Strip a single leading provider segment ("openrouter/" or "openai/").
+    if slug.startswith("openrouter/"):
+        return slug[len("openrouter/"):]
+    if slug.startswith("openai/"):
+        return slug[len("openai/"):]
+    return slug
+
+
+@mcp.tool()
+def list_fallbacks(agent: str | None = None) -> dict[str, Any]:
+    """Return the configured fallback chain for one agent, or every agent.
+
+    Args:
+        agent: optional slug (e.g. "coder-ch"). If omitted, returns all chains.
+
+    Returns:
+        {agent: [model_slug, ...]} mapping, plus a "path" field showing where
+        the file lives.
+    """
+    chains = _load_fallbacks()
+    if agent:
+        return {"path": str(_FALLBACKS_PATH), agent: chains.get(agent, [])}
+    return {"path": str(_FALLBACKS_PATH), "chains": chains}
+
+
+@mcp.tool()
+def pick_fallback(
+    agent: str,
+    exclude: list[str] | None = None,
+    skip_unavailable: bool = True,
+) -> dict[str, Any]:
+    """Return the next model the agent should try after a hard failure.
+
+    Walks the agent's fallback chain in order, skipping any slug present in
+    `exclude` (i.e. already attempted this turn). When `skip_unavailable` is
+    true (default), also skips OpenRouter slugs that aren't in the curated
+    cache — handles deprecated / renamed models gracefully.
+
+    Args:
+        agent:             agent slug (e.g. "coder-ch").
+        exclude:           model slugs already tried this turn.
+        skip_unavailable:  set False to skip the catalog cross-check (use when
+                           the curated cache itself is stale).
+
+    Returns:
+        {
+          "model":     "<slug>" | null,   # the slug to switch to (null = exhausted)
+          "remaining": int,               # how many fallbacks are still untried
+          "tried":     [...],             # exclude echoed back
+          "chain":     [...],             # full chain for transparency
+          "reason":    str                # "ok" | "exhausted" | "no-chain"
+        }
+    """
+    chains = _load_fallbacks()
+    chain = chains.get(agent) or []
+    if not chain:
+        return {
+            "model": None,
+            "remaining": 0,
+            "tried": list(exclude or []),
+            "chain": [],
+            "reason": "no-chain",
+        }
+
+    tried = set(exclude or [])
+    available_or = _catalog_slugs() if skip_unavailable else set()
+
+    for slug in chain:
+        if slug in tried:
+            continue
+        if skip_unavailable and slug.startswith("openrouter/"):
+            # Cross-check against curated catalog. Skip if missing — but only
+            # when we actually have a cache; an empty set means "unknown".
+            if available_or and _strip_provider(slug) not in available_or:
+                continue
+        # Found a viable next pick. Compute remaining as untried entries
+        # below this one in the chain.
+        idx = chain.index(slug)
+        remaining = sum(
+            1 for s in chain[idx + 1 :]
+            if s not in tried
+            and not (skip_unavailable and s.startswith("openrouter/")
+                     and available_or and _strip_provider(s) not in available_or)
+        )
+        return {
+            "model": slug,
+            "remaining": remaining,
+            "tried": list(exclude or []),
+            "chain": chain,
+            "reason": "ok",
+        }
+
+    return {
+        "model": None,
+        "remaining": 0,
+        "tried": list(exclude or []),
+        "chain": chain,
+        "reason": "exhausted",
     }
 
 
