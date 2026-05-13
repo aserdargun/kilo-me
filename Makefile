@@ -94,6 +94,9 @@ project-finish: ## Mark project completed; pass DELETE=1 or DISABLE=1 to clean u
 usage-log-summary: ## Print top-N completed prompts by cost from USAGE.log.jsonl
 	uv run scripts/usage_log.py summary
 
+cluster-doctor: ## Health-check the local cluster (router + workers + model availability)
+	uv run scripts/cluster_doctor.py
+
 agent-test: ## End-to-end smoke: ask Kilo (via kilo-me) for the top 3 coding models
 	@command -v kilo-me >/dev/null || (echo "kilo-me shim not installed; run 'make install-global'"; exit 1)
 	kilo-me run --auto "Use openrouter-models.top_coding_models to list the top 3 Chinese coding models, then write the result as a Mermaid pie chart and ingest it via mermaid-vector.ingest_mermaid."

@@ -1,0 +1,36 @@
+[Unit]
+Description=kilo-me cluster router (Pi 5)
+Documentation=https://github.com/kilo-org/kilo-me
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kilo-router --config /etc/kilo-router/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+# Security knobs — none of these are strictly required for correctness but
+# they make a compromise of the router harder to pivot from.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The router only needs to read /etc/kilo-router and bind sockets.
+ReadOnlyPaths=/etc/kilo-router
+
+# Resource caps — the router does almost no work; cap it tight so a runaway
+# never starves Tailscale or the OS.
+LimitNOFILE=4096
+MemoryMax=128M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

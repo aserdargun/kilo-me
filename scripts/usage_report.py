@@ -215,12 +215,26 @@ def _read_prompt_log() -> list[dict[str, Any]]:
             pairs.append({
                 "prompt_id": pid,
                 "agent": row.get("agent") or s.get("agent"),
+                "model": row.get("model") or s.get("model"),
                 "started": s["ts"],
                 "ended": row["ts"],
                 "cost": float(row["key_usage"]) - float(s["key_usage"]),
                 "duration_s": duration_s,
             })
     return pairs
+
+
+def _classify_tier(model: str | None) -> str:
+    """Map a model slug to a tier: 'hard' | 'soft' | 'cloud' | 'unknown'."""
+    if not model:
+        return "unknown"
+    if model.startswith("local-hard/"):
+        return "hard"
+    if model.startswith("local/"):
+        return "soft"
+    if model.startswith(("openrouter/", "openai/")):
+        return "cloud"
+    return "unknown"
 
 
 def _fetch_key_by_hash(admin_key: str, key_hash: str) -> dict[str, Any] | None:
@@ -560,6 +574,71 @@ def _render(
                 f"{p['started']} | {p['ended']} |"
             )
         lines.append("")
+
+        # ── Local cluster activity (Phase 4) ──────────────────────────────
+        # Only renders if at least one prompt has a model slug (i.e. the
+        # agent passed --model to usage_log.py snapshot).
+        tiered = [p for p in prompt_pairs if p.get("model")]
+        if tiered:
+            by_tier: dict[str, dict[str, float]] = {}
+            for p in tiered:
+                t = _classify_tier(p.get("model"))
+                slot = by_tier.setdefault(t, {"count": 0, "cost": 0.0, "duration": 0.0, "timed": 0})
+                slot["count"] += 1
+                slot["cost"] += p["cost"]
+                if p.get("duration_s") is not None:
+                    slot["duration"] += p["duration_s"]
+                    slot["timed"] += 1
+
+            local_count = sum(s["count"] for t, s in by_tier.items() if t in ("soft", "hard"))
+            local_share = (local_count / len(tiered) * 100.0) if tiered else 0.0
+
+            lines.append("## Local cluster activity")
+            lines.append("")
+            lines.append(
+                f"_{local_count} of {len(tiered)} attributed prompt(s) "
+                f"({local_share:.0f}%) ran on the local cluster; "
+                f"the rest hit cloud providers._"
+            )
+            lines.append("")
+            lines.append("| Tier | Prompts | Spend | Wall-clock | Avg time / prompt |")
+            lines.append("| --- | ---: | ---: | ---: | ---: |")
+            for tier in ("hard", "soft", "cloud", "unknown"):
+                s = by_tier.get(tier)
+                if not s:
+                    continue
+                total_t = s["duration"] if s["timed"] else None
+                avg_t = (s["duration"] / s["timed"]) if s["timed"] else None
+                lines.append(
+                    f"| {tier} | {_fmt_int(s['count'])} | {_fmt_usd(s['cost'])} | "
+                    f"{_fmt_duration(total_t)} | {_fmt_duration(avg_t)} |"
+                )
+            lines.append("")
+
+            # Escalations: a prompt that started on a local model but the
+            # *final* model row was cloud — meaning Rule 06 walked the chain.
+            # We can detect this only crudely from the end-row's model field,
+            # so flag any cloud-tier prompt invoked by a -lo agent.
+            escalations = [
+                p for p in tiered
+                if (p.get("agent") or "").endswith("-lo")
+                and _classify_tier(p.get("model")) == "cloud"
+            ]
+            if escalations:
+                lines.append("### Escalations (local → cloud)")
+                lines.append("")
+                lines.append("_The following prompts started on a -lo agent but completed on a cloud model "
+                             "— Rule 06 walked the fallback chain. Investigate if these are frequent._")
+                lines.append("")
+                lines.append("| Cost | Duration | Agent | Final model | Prompt id |")
+                lines.append("| ---: | ---: | --- | --- | --- |")
+                for p in sorted(escalations, key=lambda x: x["cost"], reverse=True)[:10]:
+                    lines.append(
+                        f"| {_fmt_usd(p['cost'])} | {_fmt_duration(p.get('duration_s'))} | "
+                        f"{p.get('agent') or '?'} | `{p.get('model') or '?'}` | "
+                        f"`{p['prompt_id']}` |"
+                    )
+                lines.append("")
 
     # ── Account-wide activity breakdown (admin key only) ──────────────────
     lines.append("## Activity breakdown (account-wide, last 30 days)")

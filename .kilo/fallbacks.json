@@ -2,25 +2,25 @@
   "_comment": "Per-agent fallback chains (5 entries each). Index 0 is the primary; 1-4 are tried in order on hard failures (429, 5xx, no-credits, timeout). Edit freely — install.sh preserves user changes on re-install. The pick_fallback MCP tool reads this file. Provider prefixes follow Kilo's slug convention: 'openrouter/<author>/<model>' or 'openai/<model>'.",
 
   "architect": [
+    "local-hard/devstral:22b-q5_K_M",
+    "local-hard/qwen3-coder:14b-instruct-q8_0",
+    "local/llama3.3:8b-instruct-q5_K_M",
     "openrouter/deepseek/deepseek-v4-pro",
-    "openrouter/anthropic/claude-opus-4.7",
-    "openrouter/moonshotai/kimi-k2.6",
-    "openrouter/qwen/qwen3.6-plus",
-    "openrouter/deepseek/deepseek-v4-flash"
+    "openrouter/anthropic/claude-opus-4.7"
   ],
   "code": [
+    "local-hard/qwen3-coder:14b-instruct-q8_0",
+    "local-hard/devstral:22b-q5_K_M",
+    "local/qwen3-coder:7b-instruct-q5_K_M",
     "openrouter/moonshotai/kimi-k2.6",
-    "openrouter/deepseek/deepseek-v4-pro",
-    "openai/gpt-5.4",
-    "openrouter/z-ai/glm-5.1",
-    "openrouter/deepseek/deepseek-v3.2"
+    "openrouter/deepseek/deepseek-v4-pro"
   ],
   "debug": [
+    "local-hard/deepseek-r1-distill-qwen:14b-q5_K_M",
+    "local-hard/phi-4:14b-q4_K_M",
+    "local/phi-4:14b-q4_K_M",
     "openrouter/z-ai/glm-5.1",
-    "openrouter/anthropic/claude-sonnet-4.6",
-    "openrouter/deepseek/deepseek-v4-pro",
-    "openrouter/qwen/qwen3.6-plus",
-    "openrouter/deepseek/deepseek-v3.2"
+    "openrouter/anthropic/claude-sonnet-4.6"
   ],
   "ask": [
     "openrouter/deepseek/deepseek-v3.2:free",
@@ -114,5 +114,48 @@
     "openrouter/anthropic/claude-sonnet-4.6",
     "openrouter/deepseek/deepseek-v3.2",
     "openrouter/qwen/qwen3.6-plus"
+  ],
+
+  "architect-lo": [
+    "local-hard/devstral:22b-q5_K_M",
+    "local-hard/qwen3-coder:14b-instruct-q8_0",
+    "local/llama3.3:8b-instruct-q5_K_M",
+    "openrouter/deepseek/deepseek-v4-pro",
+    "openrouter/anthropic/claude-opus-4.7"
+  ],
+  "coder-lo": [
+    "local-hard/qwen3-coder:14b-instruct-q8_0",
+    "local-hard/devstral:22b-q5_K_M",
+    "local/qwen3-coder:7b-instruct-q5_K_M",
+    "openrouter/moonshotai/kimi-k2.6",
+    "openrouter/deepseek/deepseek-v4-pro"
+  ],
+  "debugger-lo": [
+    "local-hard/deepseek-r1-distill-qwen:14b-q5_K_M",
+    "local-hard/phi-4:14b-q4_K_M",
+    "local/phi-4:14b-q4_K_M",
+    "openrouter/z-ai/glm-5.1",
+    "openrouter/anthropic/claude-sonnet-4.6"
+  ],
+  "memory-curator-lo": [
+    "local/llama3.3:8b-instruct-q5_K_M",
+    "local/qwen3-coder:7b-instruct-q5_K_M",
+    "local-hard/deepseek-r1-distill-qwen:14b-q5_K_M",
+    "openrouter/qwen/qwen3.6-plus",
+    "openrouter/anthropic/claude-haiku-4.5"
+  ],
+  "cheap-fallback-lo": [
+    "local/gemma3:4b",
+    "local/llama3.3:8b-instruct-q5_K_M",
+    "local-hard/phi-4:14b-q4_K_M",
+    "openrouter/deepseek/deepseek-v3.2",
+    "openrouter/x-ai/grok-4.1-fast"
+  ],
+  "accountant-lo": [
+    "local/llama3.3:8b-instruct-q5_K_M",
+    "local/qwen3-coder:7b-instruct-q5_K_M",
+    "local-hard/phi-4:14b-q4_K_M",
+    "openrouter/deepseek/deepseek-v3.2",
+    "openrouter/anthropic/claude-haiku-4.5"
   ]
 }

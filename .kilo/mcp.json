@@ -47,6 +47,13 @@
       },
       "alwaysAllow": ["enrich_task", "enrichment_status"],
       "disabled": false
+    },
+    "cluster-health": {
+      "command": "uv",
+      "args": ["run", "--script", "__KILO_HOME__/mcp_servers/cluster_health/server.py"],
+      "env": {},
+      "alwaysAllow": ["cluster_status", "worker_models", "route_for"],
+      "disabled": false
     }
   }
 }

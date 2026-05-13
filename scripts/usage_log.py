@@ -151,6 +151,8 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
         "agent": args.agent,
         "key_usage": usage,
     }
+    if args.model:
+        row["model"] = args.model
     if args.tag:
         row["tag"] = args.tag
     path = _append_log(cwd, row)
@@ -215,6 +217,9 @@ def main() -> int:
     p_snap.add_argument("--prompt-id", required=True,
                         help="stable id; the same value must be used for start and end")
     p_snap.add_argument("--agent", default=None, help="agent name (e.g. coder-ch)")
+    p_snap.add_argument("--model", default=None,
+                        help="model slug (e.g. local-hard/qwen3-coder:14b...); "
+                             "lets usage_report.py attribute prompts to soft/hard/cloud tiers")
     p_snap.add_argument("--key-hash", default=None,
                         help="override key hash (default: read from .kilo/project.json)")
     p_snap.add_argument("--tag", default=None, help="optional free-form label")

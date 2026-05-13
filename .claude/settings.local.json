@@ -20,7 +20,19 @@
       "Bash(uv run *)",
       "Bash(FALLBACKS_PATH=.kilo/fallbacks.json MODELS_CACHE_PATH=/tmp/does-not-exist.json uv run *)",
       "Bash(bash -n install.sh)",
-      "Bash(bash -n uninstall.sh)"
+      "Bash(bash -n uninstall.sh)",
+      "Bash(bash -n /Users/aserdargun/Projects/kilo-me/cluster/workers/setup-macmini.sh)",
+      "Bash(bash -n /Users/aserdargun/Projects/kilo-me/cluster/workers/setup-rtx.sh)",
+      "Bash(command -v go)",
+      "Bash(go version *)",
+      "Bash(brew list *)",
+      "Bash(brew --prefix)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(bash -n /Users/aserdargun/Projects/kilo-me/cluster/router/setup-pi.sh)",
+      "Bash(bash -n cluster/workers/setup-macmini.sh)",
+      "Bash(bash -n cluster/workers/setup-rtx.sh)",
+      "Bash(bash -n cluster/router/setup-pi.sh)",
+      "Bash(awk '{print \"  \", $NF}')"
     ]
   }
 }

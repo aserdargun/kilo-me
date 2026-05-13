@@ -1,0 +1,64 @@
+# kilo-router config — annotated template.
+# Copy to /etc/kilo-router/config.yaml on the Pi (setup-pi.sh does this for you)
+# and edit the URLs / token to match your tailnet + Phase 1/2 workers.
+
+server:
+  # The router listens here. ":8080" binds on all interfaces; restrict via
+  # the Tailscale ACLs if you want to lock down which tailnet members can
+  # reach the router (recommended once you have non-dev devices on the net).
+  listen: ":8080"
+
+auth:
+  # Shared bearer token. Match this in the dev machine's auth.json under
+  # the "local" provider's `key` field. Any non-empty string works; use a
+  # generated UUID for production.
+  token: "kilo-local"
+
+workers:
+  # Soft tier — Mac mini M4 (Phase 1)
+  soft:
+    url: "http://macmini:11434"
+    models:
+      - "qwen3-coder:7b-instruct-q5_K_M"
+      - "llama3.3:8b-instruct-q5_K_M"
+      - "phi-4:14b-q4_K_M"
+      - "gemma3:4b"
+
+  # Hard tier — RTX 4070 Ti Super (Phase 2)
+  hard:
+    url: "http://rtx:11434"
+    models:
+      - "qwen3-coder:14b-instruct-q8_0"
+      - "devstral:22b-q5_K_M"
+      - "deepseek-r1-distill-qwen:14b-q5_K_M"
+      - "phi-4:14b-q4_K_M"
+
+routing:
+  # Requests with > this many estimated tokens (4 chars ≈ 1 token) go to
+  # the hard tier even when the model could run on soft.
+  token_threshold_for_hard: 8000
+
+  # Requests with > this many entries in the `tools` array go to hard.
+  tool_count_threshold_for_hard: 5
+
+  # Where to land requests whose model isn't listed in any worker (catch-all).
+  # Set to "hard" if you'd rather burn GPU than fall through to soft.
+  default_tier: "soft"
+
+# Phase 5 — optional 1B "router-assist" LLM running on the Pi itself.
+# Consulted ONLY when the static classifier would otherwise pick the tier
+# alphabetically (ambiguous-multi-tier case). Its vote is best-effort: on
+# timeout / HTTP error / unparseable response the static answer is used.
+#
+# Adds ~0.5–1.5 s of latency to that one path. The hot paths (model-on-one-
+# tier, oversize prompts) are unaffected.
+#
+# To enable: re-run setup-pi.sh with ENABLE_ASSIST=1, or set router_assist.enabled
+# to true manually after running `ollama pull qwen2.5:1.5b-instruct-q4_K_M`
+# on the Pi.
+router_assist:
+  enabled: false
+  url: "http://127.0.0.1:11434"
+  model: "qwen2.5:1.5b-instruct-q4_K_M"
+  timeout_ms: 1500
+  max_chars: 2000

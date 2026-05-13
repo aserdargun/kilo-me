@@ -2,7 +2,24 @@
 
 Active work tracker for **kilo-me**. Move items to `CHANGELOG.md`'s `[Unreleased]` section once they land; remove them from this file when they ship in a tagged release.
 
-## Current milestone — kilo-me rename + agent expansion
+## Open
+
+### Post-merge follow-ups
+
+- [ ] Re-run `bash install.sh` after the rename to refresh `~/.config/kilo/`.
+- [ ] Re-run `kilo auth login` to confirm the no-wrapper flow works end-to-end.
+- [ ] Re-cut the daily cron lines if your crontab pinned them to the old path.
+
+### Nice-to-have / next milestones
+
+- [ ] Native PowerShell installer (`install.ps1`) so Windows users don't need WSL.
+- [ ] `graph-memory.delete_node` + cascade delete for pruning bad ingests.
+- [ ] CI workflow that runs `make test` + `make lint` across macOS, Linux, and WSL2.
+- [ ] Auto-generate `AGENTS.md` from `kilo.jsonc` so the matrix never drifts.
+
+## Completed (pending next release)
+
+### kilo-me rename + agent expansion
 
 - [x] Rename project to `kilo-me` (pyproject + every internal reference).
 - [x] Remove the legacy custom auth wrapper command; rely on `kilo auth login` for credential setup.
@@ -19,32 +36,18 @@ Active work tracker for **kilo-me**. Move items to `CHANGELOG.md`'s `[Unreleased
 - [x] Add a graph database (Kuzu) for memory and wire `memory-curator-ch` / `memory-curator-us` to write nodes + edges.
 - [x] Make `ask` route through OpenRouter free models only (`top_free_models()` MCP tool + `.kilo/agents/ask.md`).
 - [x] Document Windows support (WSL2 / Git Bash) in `README.md` and `CLAUDE.md`.
-- [x] Add generated each project itself cost from OpenRouter API to `USAGE.md` with detailed usage statistics. (`make usage-report` → `scripts/usage_report.py`)
-- [x] Per-project key provisioning + per-prompt cost logging workflow:
+- [x] Per-project cost tracking via OpenRouter admin key + sub-key provisioning:
   - `make project-init` → admin key provisions a per-project sub-key, writes `./auth.json` + `./.kilo/project.json`
   - `scripts/usage_log.py snapshot --phase {start,end} --prompt-id <id>` → captures `/keys/{hash}.usage` deltas to `./USAGE.log.jsonl` (Rule 04)
-  - `make usage-report` → reads project state, prefers admin `/keys/{hash}` for authoritative spend, renders Per-prompt costs section
+  - `make usage-report` → prefers admin `/keys/{hash}` for authoritative spend, renders per-prompt costs in `USAGE.md`
   - `make project-finish [DELETE=1|DISABLE=1]` → marks complete, snapshots final cost, optionally cleans up the OpenRouter key
+- [x] Move the working directory to `kilo-me/` and update any local IDE / shell aliases.
 
-## Post-merge follow-ups
+### Local cluster + fallback chains + accounting
 
-- [x] Move the working directory to `kilo-me/` and update any local IDE / shell aliases. Out-of-band step — git history follows.
-- [ ] Re-run `bash install.sh` after the rename to refresh `~/.config/kilo/`.
-- [ ] Re-run `kilo auth login` to confirm the no-wrapper flow works end-to-end.
-- [ ] Re-cut the daily cron lines if your crontab pinned them to the old path.
-
-## Nice-to-have / next milestones
-
-- [ ] Native PowerShell installer (`install.ps1`) so Windows users don't need WSL.
-- [ ] `graph-memory.delete_node` + cascade delete for pruning bad ingests.
-- [ ] CI workflow that runs `make test` + `make lint` across macOS, Linux, and WSL2.
-- [ ] Auto-generate `AGENTS.md` from `kilo.jsonc` so the matrix never drifts.
-
-
-# My Development Ideas and Issues
-* Always enrich task with Chatgpt 5.4 model from openai subscribed before start. COMPLETED
-* Generate an accounting subagent which will calculate created project costs and durations. It will store up to date USAGE.md file. COMPLETED
-* Every agent should have fallback agents up to a config plan in kilo-me app. It should have 5 alternatives for each agents.
-* Generate local cluster using ollama server support on kilo-me. For example, I have Raspberry pi 5 8 gb for routing. I have Mac mini M4 24 gb as soft inferences and I have RTX 4070 Ti Super 16 gb as hard inferences. Build me a plan to implement this.
-* Create local agents for architect-lo, coder-lo, debugger-lo, memory-curator-lo, cheap-fallback-lo. They will use ollama server. My local cluster router will decide task size and it will send task to necessary inferencing device.
-* While I am using this kilo-me wrapped command on windows machine. I encountered mcp not enabling issue. Find root cause and solve this issue.  
+- [x] Resolve the Windows "MCP not enabling" issue in the kilo-me wrapper (root-caused and fixed).
+- [x] Pre-enrich every task with GPT-5.4 (OpenAI subscription) before agent dispatch.
+- [x] Accounting subagent that maintains per-project `USAGE.md` with cost + duration (`accountant-ch` / `-us` / `-lo`).
+- [x] 5-alternative fallback chain per agent slot, configurable in `.kilo/fallbacks.json` (consumed by the `pick_fallback` MCP tool).
+- [x] Local Ollama cluster plan: Raspberry Pi 5 (8 GB) as router, Mac mini M4 (24 GB) for soft inferences, RTX 4070 Ti Super (16 GB) for hard inferences — see `cluster/README.md` and `mcp_servers/cluster_health/`.
+- [x] `-lo` agent variants — `architect-lo`, `coder-lo`, `debugger-lo`, `memory-curator-lo`, `cheap-fallback-lo` — routed through the local cluster (`.kilo/rules/07-local-cluster-routing.md`).

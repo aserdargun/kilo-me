@@ -56,6 +56,7 @@ If `./.kilo/project.json` does not exist, do nothing — this project doesn't ha
    - The most expensive agent this run and whether that's expected.
    - Any prompt that took >5× the median duration ("Run-away prompt detected: `<id>`").
    - A flag if total cost is within 10% of the key limit — recommend raising the limit or calling `make project-finish`.
+   - **Local cluster health snapshot.** Call `cluster-health.cluster_status` once and note worker availability in one sentence ("Local cluster healthy" / "Hard tier down for the last X polls — check `make cluster-doctor`"). If the new **Local cluster activity** section shows >0 escalations, flag the count and the most common escalated agent.
 
    Keep it to ≤120 words. No marketing language. If there's nothing notable, write "Nothing unusual." and move on.
 

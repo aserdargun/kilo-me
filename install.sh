@@ -203,6 +203,8 @@ else
   EXISTING_INF=""
   EXISTING_ADMIN=""
   EXISTING_OPENAI=""
+  EXISTING_LOCAL_URL=""
+  EXISTING_LOCAL_KEY=""
   if [ -f "$AUTH_FILE" ]; then
     EXISTING_INF=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
 import json, sys
@@ -236,26 +238,90 @@ v = (d.get("openai") or {}).get("key") or d.get("OPENAI_API_KEY") or ""
 print(v)
 PYEOF
 )
+    EXISTING_LOCAL_URL=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+print((d.get("local") or {}).get("base_url", ""))
+PYEOF
+)
+    EXISTING_LOCAL_KEY=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+print((d.get("local") or {}).get("key", ""))
+PYEOF
+)
+    EXISTING_HARD_URL=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+print((d.get("local-hard") or {}).get("base_url", ""))
+PYEOF
+)
+    EXISTING_HARD_KEY=$(uv run --no-project python - "$AUTH_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+print((d.get("local-hard") or {}).get("key", ""))
+PYEOF
+)
   fi
 
   log "configuring $AUTH_FILE — paste keys (input hidden); press Enter to keep existing"
   OR_INFERENCE_KEY=$(prompt_secret "OpenRouter API key (inference, sk-or-v1-…)" "$EXISTING_INF")
   OR_ADMIN_KEY=$(prompt_secret "OpenRouter management key (sk-or-mgmt-… or sk-or-v1-…)" "$EXISTING_ADMIN")
   OPENAI_KEY=$(prompt_secret "OpenAI API key for task-enricher / gpt-5.4 (sk-…)" "$EXISTING_OPENAI")
+  ROUTER_URL=$(prompt_secret "Pi router URL (Phase 3, e.g. http://pi:8080/v1; blank = no router → use the per-tier URLs below)" "")
+  if [ -n "$ROUTER_URL" ]; then
+    # Router-mode: a single endpoint serves both tiers. The router decides
+    # internally. We point BOTH provider blocks at it so any agent's
+    # `local/...` or `local-hard/...` model slug works without kilo.jsonc edits.
+    LOCAL_URL="$ROUTER_URL"
+    HARD_URL="$ROUTER_URL"
+    LOCAL_KEY=$(prompt_secret "Router shared token (default 'kilo-local')" "${EXISTING_LOCAL_KEY:-kilo-local}")
+    HARD_KEY="$LOCAL_KEY"
+    log "  router mode — local and local-hard both → $ROUTER_URL"
+  else
+    LOCAL_URL=$(prompt_secret "Soft-tier base URL (Mac mini, e.g. http://macmini:11434/v1; blank = no cluster)" "$EXISTING_LOCAL_URL")
+    LOCAL_KEY=$(prompt_secret "Soft-tier shared token (any non-empty string; default 'kilo-local')" "${EXISTING_LOCAL_KEY:-kilo-local}")
+    HARD_URL=$(prompt_secret "Hard-tier base URL (RTX, e.g. http://rtx:11434/v1; blank = soft-tier only)" "$EXISTING_HARD_URL")
+    HARD_KEY=$(prompt_secret "Hard-tier shared token (default 'kilo-local')" "${EXISTING_HARD_KEY:-kilo-local}")
+  fi
 
-  if [ -z "$OR_INFERENCE_KEY" ] && [ -z "$OR_ADMIN_KEY" ] && [ -z "$OPENAI_KEY" ]; then
+  if [ -z "$OR_INFERENCE_KEY" ] && [ -z "$OR_ADMIN_KEY" ] && [ -z "$OPENAI_KEY" ] && [ -z "$LOCAL_URL" ] && [ -z "$HARD_URL" ]; then
     warn "  no keys provided — leaving auth.json untouched"
   else
     AUTH_FILE="$AUTH_FILE" \
     OR_INFERENCE_KEY="$OR_INFERENCE_KEY" \
     OR_ADMIN_KEY="$OR_ADMIN_KEY" \
     OPENAI_KEY="$OPENAI_KEY" \
+    LOCAL_URL="$LOCAL_URL" \
+    LOCAL_KEY="$LOCAL_KEY" \
+    HARD_URL="$HARD_URL" \
+    HARD_KEY="$HARD_KEY" \
     uv run --no-project python - <<'PYEOF'
 import json, os, pathlib
 path = pathlib.Path(os.environ["AUTH_FILE"])
 inf = os.environ.get("OR_INFERENCE_KEY", "")
 admin = os.environ.get("OR_ADMIN_KEY", "")
 oai = os.environ.get("OPENAI_KEY", "")
+local_url = os.environ.get("LOCAL_URL", "")
+local_key = os.environ.get("LOCAL_KEY", "")
+hard_url = os.environ.get("HARD_URL", "")
+hard_key = os.environ.get("HARD_KEY", "")
 data = {}
 if path.exists():
     try:
@@ -277,6 +343,21 @@ if oai:
     prov["type"] = "api"
     prov["key"] = oai
     data["OPENAI_API_KEY"] = oai
+if local_url:
+    # Soft-tier local cluster (Mac mini via Tailscale → Ollama).
+    # type "openai-compat" tells Kilo this is an OpenAI-shape endpoint
+    # at a non-standard URL.
+    prov = data.setdefault("local", {})
+    prov["type"] = "openai-compat"
+    prov["key"] = local_key or "kilo-local"
+    prov["base_url"] = local_url.rstrip("/")
+if hard_url:
+    # Hard-tier local cluster (RTX via Tailscale → Ollama). architect-lo /
+    # coder-lo / debugger-lo land here. Phase 3 router will make this dynamic.
+    prov = data.setdefault("local-hard", {})
+    prov["type"] = "openai-compat"
+    prov["key"] = hard_key or "kilo-local"
+    prov["base_url"] = hard_url.rstrip("/")
 path.write_text(json.dumps(data, indent=2) + "\n")
 try:
     os.chmod(path, 0o600)
@@ -323,7 +404,7 @@ chmod +x "$KILO_HOME"/scripts/*.py 2>/dev/null || true
 #    (forces dep download once, so the first MCP call doesn't time out)
 # -----------------------------------------------------------------------------
 log "pre-warming uv caches for MCP servers (first run downloads deps)"
-for srv in sqlite_memory openrouter_models mermaid_vector graph_memory task_enricher; do
+for srv in sqlite_memory openrouter_models mermaid_vector graph_memory task_enricher cluster_health; do
   printf "  - %-20s " "$srv"
   # `timeout` lets uv resolve+download deps, then kills the blocking MCP server
   # process before it hangs waiting on stdin. Exit code 124 = timed out = ok.
@@ -386,10 +467,12 @@ except (FileNotFoundError, json.JSONDecodeError):
     state = {}
 
 m = state.setdefault("model", {})
-# Built-in slots
-m["code"]              = {"providerID": "openrouter", "modelID": "moonshotai/kimi-k2.6"}
-m["architect"]         = {"providerID": "openrouter", "modelID": "deepseek/deepseek-v4-pro"}
-m["debug"]             = {"providerID": "openrouter", "modelID": "z-ai/glm-5.1"}
+# Built-in slots — LOCAL-first, hard tier. The "local-hard" providerID maps
+# to the RTX worker declared in auth.json. Rule 06 fallbacks walk
+# local-hard → local (soft, Mac mini) → -ch / -us on cluster outage.
+m["code"]              = {"providerID": "local-hard", "modelID": "qwen3-coder:14b-instruct-q8_0"}
+m["architect"]         = {"providerID": "local-hard", "modelID": "devstral:22b-q5_K_M"}
+m["debug"]             = {"providerID": "local-hard", "modelID": "deepseek-r1-distill-qwen:14b-q5_K_M"}
 m["ask"]               = {"providerID": "openrouter", "modelID": "deepseek/deepseek-v3.2:free"}
 m["plan"]              = {"providerID": "openrouter", "modelID": "minimax/minimax-m2.7"}
 
@@ -408,6 +491,16 @@ m["debugger-us"]       = {"providerID": "openrouter", "modelID": "anthropic/clau
 m["memory-curator-us"] = {"providerID": "openrouter", "modelID": "anthropic/claude-haiku-4.5"}
 m["cheap-fallback-us"] = {"providerID": "openrouter", "modelID": "x-ai/grok-4.1-fast"}
 m["accountant-us"]     = {"providerID": "openrouter", "modelID": "anthropic/claude-haiku-4.5"}
+
+# Local cluster lineup — Ollama via Tailscale (Rule 07). Phase 2: hard tier
+# on "local-hard" (RTX), soft tier on "local" (Mac mini). Phase 3 will fold
+# these back into a single "local" provider once the Pi router can decide.
+m["architect-lo"]      = {"providerID": "local-hard", "modelID": "devstral:22b-q5_K_M"}
+m["coder-lo"]          = {"providerID": "local-hard", "modelID": "qwen3-coder:14b-instruct-q8_0"}
+m["debugger-lo"]       = {"providerID": "local-hard", "modelID": "deepseek-r1-distill-qwen:14b-q5_K_M"}
+m["memory-curator-lo"] = {"providerID": "local",      "modelID": "llama3.3:8b-instruct-q5_K_M"}
+m["cheap-fallback-lo"] = {"providerID": "local",      "modelID": "gemma3:4b"}
+m["accountant-lo"]     = {"providerID": "local",      "modelID": "llama3.3:8b-instruct-q5_K_M"}
 
 with open(path, "w") as f:
     json.dump(state, f, indent=2)
@@ -493,10 +586,11 @@ ${GRN}===== install complete =====${NC}
   KILO_STATE_HOME = $KILO_STATE_HOME
 
   Config       : $KILO_HOME/kilo.jsonc
-  Agents       : $KILO_HOME/agents/        (architect/coder/debugger/memory-curator/accountant × ch+us, plus ask)
-  Rules        : $KILO_HOME/rules/         (01–06; 05 = gpt-5.4 task enrichment, 06 = 5-model fallback chain)
-  MCP servers  : $KILO_HOME/mcp_servers/   (sqlite-memory, openrouter-models, mermaid-vector, graph-memory, task-enricher)
+  Agents       : $KILO_HOME/agents/        (architect/coder/debugger/memory-curator/accountant × ch+us+lo, plus ask)
+  Rules        : $KILO_HOME/rules/         (01–07; 05 = enrichment, 06 = fallbacks, 07 = local-cluster routing)
+  MCP servers  : $KILO_HOME/mcp_servers/   (sqlite-memory, openrouter-models, mermaid-vector, graph-memory, task-enricher, cluster-health)
   Fallbacks    : $KILO_HOME/fallbacks.json (per-agent 5-model chain — Rule 06)
+  Cluster      : $SRC_DIR/cluster/          (workers/setup-{macmini,rtx}.sh; router/setup-pi.sh)
   Memory DB    : $KILO_HOME/memory.sqlite
   ChromaDB     : $KILO_HOME/chroma/
   Graph DB     : $KILO_HOME/graph.kuzu/
